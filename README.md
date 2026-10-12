@@ -271,7 +271,7 @@ The complete manuscript citation and manuscript author list will be added here w
 **Elizabeth B. Amona, PhD**  
 Biostatistics Core, Brown Cancer Center  
 University of Louisville  
-ORCID: https://orcid.org/0000-0002-7575-788X
+**ORCID:** [0000-0002-7575-788X](https://orcid.org/0000-0002-7575-788X)
 
 ---
 
