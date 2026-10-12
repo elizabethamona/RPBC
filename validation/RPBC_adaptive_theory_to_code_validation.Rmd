@@ -1,0 +1,1418 @@
+---
+title: "Theory-to-Code Validation of Adaptive RPBC: Equations, Stabilization, and Preservation Properties"
+author: "Elizabeth B. Amona, PhD"
+date: "October 7, 2026"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+    code_folding: show
+---
+
+# Purpose
+
+This tutorial documents the controlled numerical validation of the **Adaptive Region-Preserving Batch Correction (Adaptive RPBC)** statistical engine.
+
+The goal is not merely to show that the R code runs. The purpose is to connect the implementation directly to the mathematical structure of the RPBC manuscript and ask whether the software behaves consistently with the equations, identifying constraints, preservation target, and Adaptive stabilization principle specified there.
+
+The central questions are:
+
+- Does the empirical-Bayes algorithm converge?
+- Are the RPBC identifiability constraints enforced numerically?
+- Does the implementation reproduce the Adaptive group-size weight in Equation (15)?
+- Does it reproduce the log-scale stabilization and bounding operations in Equations (16)-(17)?
+- Does the returned harmonized matrix reproduce Equation (18) exactly when that transformation is reconstructed independently?
+- Is the patient-balanced population-average Core-Edge location contrast closely retained after harmonization?
+- Is patient-region scale heterogeneity reduced?
+- Does the Adaptive mechanism behave as intended when patient-region sample size changes?
+
+> **Important:** These controlled toy examples provide numerical evidence that the software implementation follows the intended mathematics. They complement, but do not replace, the analytical results in the manuscript or the broader simulation and real-data evaluations.
+
+# How This Tutorial Connects to the Manuscript
+
+Equation numbering in this document follows the current RPBC manuscript used during package development.
+
+| Manuscript component | Role in the method | Validation connection in this tutorial |
+|:--|:--|:--|
+| Equation (6) | RPBC location-scale model | Defines the common location-scale structure retained by Adaptive RPBC |
+| Equation (8) | Sum-to-zero identifying constraints | Checked numerically using posterior `gamma_star` and `kappa_star` |
+| Equation (9) | Protected population-average location component | Used in standardization and reconstruction |
+| Equation (15) | Adaptive group-size weight | Verified exactly in Toy Examples 1 and 2 |
+| Equation (16) | Log-scale stabilization | Reconstructed independently and compared with `delta_star` |
+| Equation (17) | Lower/upper bounds on stabilized variance multiplier | Verified directly |
+| Equation (18) | Adaptive standardized harmonization | Reconstructed independently and matched exactly to the engine output |
+| Equations (20)-(21) | Empirical-Bayes hyperparameters | Implemented upstream of the Adaptive iteration |
+| Equations (23)-(25) | Joint and constrained posterior location update | Reflected in the posterior nuisance-location estimates |
+| Equation (26) | Patient-region residual sum of squares | Used in the scale update |
+| Equation (27) | Unstabilized EB posterior variance-multiplier update | Produces the raw value stored as `delta_star_raw` before Equations (15)-(17) are applied |
+
+Adaptive RPBC retains the ordinary RPBC location model, effect coding, preservation target, and identifying constraints. Its distinguishing modification is the **group-size-dependent stabilization of the patient-region variance multiplier** before that multiplier is reused in the next empirical-Bayes iteration and in final harmonization.
+
+# Core Statistical Intuition of Adaptive RPBC
+
+The central motivation for Adaptive RPBC is **sampling stability**.
+
+A patient-region variance multiplier estimated from only a few cells is based on relatively little information and is therefore less stable. Adaptive RPBC responds by shrinking that estimate more strongly toward the neutral variance multiplier, 1.
+
+For patient-region group \(h\),
+
+\[
+w_h = \frac{n_h}{n_h + k},
+\]
+
+with the final prespecified Adaptive RPBC specification using \(k=1\).
+
+The intuition can be summarized as
+
+\[
+\text{small } n_h
+\;\longrightarrow\;
+\text{less stable } \delta^2
+\;\longrightarrow\;
+\text{smaller } w_h
+\;\longrightarrow\;
+\text{stronger stabilization toward } 1,
+\]
+
+whereas
+
+\[
+\text{large } n_h
+\;\longrightarrow\;
+\text{more stable } \delta^2
+\;\longrightarrow\;
+w_h \rightarrow 1
+\;\longrightarrow\;
+\text{less alteration of the raw EB estimate}.
+\]
+
+This is the core statistical reason the Adaptive extension exists.
+
+The neutral value \(\delta^2=1\) corresponds to **no patient-region-specific residual scale distortion on the standardized scale**. The Adaptive procedure therefore regularizes uncertain scale estimates toward no scale correction while preserving whether the unstabilized estimate lies above or below 1.
+
+# Theory, Code, and Empirical Validation Are Different Layers
+
+This tutorial deliberately separates three complementary forms of evidence.
+
+**Mathematical theory** establishes why the model is parameterized as it is and why the designated protected component is identified under the stated assumptions.
+
+**Theory-to-code validation** checks that the R implementation actually enforces those mathematical restrictions and transformations numerically.
+
+**Simulation and real-data evaluation** examine statistical performance under finite samples, noise, heterogeneity, model misspecification, and realistic biological data.
+
+The numerical checks below are therefore not substitutes for the manuscript's theoretical arguments. They are implementation-level evidence that the software behaves consistently with those arguments.
+
+# Package Setup
+
+The completed Adaptive engine is loaded from the package under development.
+
+```{r package-setup, eval=FALSE}
+devtools::load_all()
+```
+
+Observed console result:
+
+```text
+Loading RPBC
+```
+
+No loading error or warning was produced.
+
+**Result: PASS**
+
+# Toy Example 1: Small Patient-Region Sample Sizes
+
+## Scientific Question
+
+Does Adaptive RPBC behave correctly in the small-sample setting that motivates its stabilization mechanism?
+
+Toy Example 1 deliberately uses:
+
+- 6 molecular features;
+- 4 paired patients;
+- Core and Edge regions for every patient;
+- 5 cells per patient-region group;
+- 8 patient-region groups;
+- 40 cells total;
+- patient-wide location shifts;
+- patient-specific regional deviations;
+- deliberately heterogeneous patient-region residual scales.
+
+Because every patient-region group has \(n_h=5\), Equation (15) implies
+
+\[
+w_h = \frac{5}{5+1} = \frac{5}{6} \approx 0.8333333
+\]
+
+for every group.
+
+## Data Structure
+
+```{r toy1-group-structure, eval=FALSE}
+set.seed(20261007)
+
+group_info <- data.frame(
+  patient = c(
+    "P1", "P1",
+    "P2", "P2",
+    "P3", "P3",
+    "P4", "P4"
+  ),
+  region = c(
+    "Core", "Edge",
+    "Core", "Edge",
+    "Core", "Edge",
+    "Core", "Edge"
+  ),
+  n = rep(5, 8)
+)
+
+group_info
+
+patient <- rep(
+  group_info$patient,
+  times = group_info$n
+)
+
+region <- rep(
+  group_info$region,
+  times = group_info$n
+)
+
+table(patient, region)
+```
+
+Observed design:
+
+```text
+        region
+patient Core Edge
+P1         5    5
+P2         5    5
+P3         5    5
+P4         5    5
+```
+
+Every patient contributes both regions, satisfying the paired-design requirement.
+
+## True Location Components
+
+```{r toy1-location-components, eval=FALSE}
+n_features <- 6
+
+alpha <- c(
+  5.0, 6.0, 7.0,
+  8.0, 9.0, 10.0
+)
+
+# With Core = -1 and Edge = +1,
+# the Edge-Core population-average contrast is 2 * beta_region.
+beta_region <- c(
+  0.60, 0.40, 0.75,
+  0.50, 0.65, 0.35
+)
+
+gamma_true <- rbind(
+  P1 = c( 1.00,  0.80,  1.20,  0.70,  1.10,  0.90),
+  P2 = c(-0.70, -0.60, -0.90, -0.50, -0.80, -0.60),
+  P3 = c( 0.50,  0.40,  0.60,  0.30,  0.50,  0.40),
+  P4 = c(-0.80, -0.60, -0.90, -0.50, -0.80, -0.70)
+)
+
+kappa_true <- rbind(
+  P1 = c( 0.30,  0.20,  0.25,  0.30,  0.20,  0.25),
+  P2 = c(-0.20, -0.15, -0.20, -0.20, -0.15, -0.20),
+  P3 = c( 0.15,  0.10,  0.15,  0.10,  0.15,  0.10),
+  P4 = c(-0.25, -0.15, -0.20, -0.20, -0.20, -0.15)
+)
+
+colSums(gamma_true)
+colSums(kappa_true)
+```
+
+Observed result:
+
+The column sums were numerically zero up to ordinary floating-point precision.
+
+This confirms that the simulated patient and patient-by-region location components were generated consistently with the intended sum-to-zero structure.
+
+## Deliberate Patient-Region Scale Heterogeneity
+
+```{r toy1-scale-structure, eval=FALSE}
+group_sd <- c(
+  P1_Core = 0.40,
+  P1_Edge = 1.40,
+  P2_Core = 0.65,
+  P2_Edge = 1.20,
+  P3_Core = 1.50,
+  P3_Edge = 0.50,
+  P4_Core = 0.75,
+  P4_Edge = 1.60
+)
+
+group_sd
+```
+
+The groups therefore begin with deliberately different residual scales.
+
+## Generate the Toy Dataset
+
+```{r toy1-generate-data, eval=FALSE}
+n_cells <- length(patient)
+
+dat_adaptive <- matrix(
+  NA_real_,
+  nrow = n_features,
+  ncol = n_cells
+)
+
+rownames(dat_adaptive) <- paste0(
+  "Feature",
+  seq_len(n_features)
+)
+
+cell_counter <- 1L
+
+for (h in seq_len(nrow(group_info))) {
+
+  p <- group_info$patient[h]
+  r <- group_info$region[h]
+  nh <- group_info$n[h]
+
+  R_code <- ifelse(
+    r == "Edge",
+    1,
+    -1
+  )
+
+  sd_h <- group_sd[
+    paste0(p, "_", r)
+  ]
+
+  idx <- cell_counter:(
+    cell_counter + nh - 1L
+  )
+
+  for (g in seq_len(n_features)) {
+
+    mu <- alpha[g] +
+      beta_region[g] * R_code +
+      gamma_true[p, g] +
+      kappa_true[p, g] * R_code
+
+    dat_adaptive[g, idx] <- rnorm(
+      nh,
+      mean = mu,
+      sd = sd_h
+    )
+  }
+
+  cell_counter <- cell_counter + nh
+}
+
+dim(dat_adaptive)
+```
+
+Observed output:
+
+```text
+[1]  6 40
+```
+
+The resulting matrix contains 6 features measured across 40 cells.
+
+## Run Adaptive RPBC
+
+```{r toy1-fit, eval=FALSE}
+fit_adaptive <- .rpbc_fit_matrix_adaptive(
+  dat = dat_adaptive,
+  patient = patient,
+  region = region,
+  core_level = "Core",
+  edge_level = "Edge"
+)
+```
+
+Observed console message:
+
+```text
+Finding Adaptive RPBC parametric empirical-Bayes adjustments...
+```
+
+No error or convergence warning occurred.
+
+# Basic Computational Checks
+
+## Question
+
+Does the engine return a valid result and converge for every feature?
+
+```{r toy1-convergence, eval=FALSE}
+dim(fit_adaptive$data)
+
+all(is.finite(fit_adaptive$data))
+
+fit_adaptive$converged
+
+fit_adaptive$iterations
+```
+
+Observed key output:
+
+```text
+fit_adaptive$converged
+[1] TRUE TRUE TRUE TRUE TRUE TRUE
+
+fit_adaptive$iterations
+[1] 5 5 4 4 3 5
+```
+
+All six features converged, requiring only 3-5 empirical-Bayes iterations.
+
+**Result: PASS**
+
+# Theory Connection: Identifiability Constraints
+
+## Manuscript Connection
+
+The constrained RPBC location model requires, for each feature \(g\),
+
+\[
+\sum_p \gamma_{pg} = 0
+\]
+
+and
+
+\[
+\sum_p \kappa_{pg} = 0.
+\]
+
+These are the standardized-scale counterparts of the identifying restrictions in Equation (8).
+
+Section 2.5.1 of the manuscript shows that, under the paired Core/Edge design and full-rank location design, these restrictions separate the population-average regional component from the patient-specific location components and yield an identifiable constrained location parameterization.
+
+Adaptive RPBC retains this same location model and these same identifying constraints; its modification acts on the patient-region **scale** component.
+
+## Numerical Check
+
+```{r toy1-identifiability, eval=FALSE}
+colSums(fit_adaptive$gamma_star)
+
+colSums(fit_adaptive$kappa_star)
+```
+
+Observed result:
+
+- posterior \(\gamma\) column sums were zero up to approximately \(10^{-16}\);
+- posterior \(\kappa\) column sums were zero up to approximately \(10^{-17}\) to \(10^{-16}\).
+
+These values are ordinary floating-point rounding error and are numerically zero.
+
+## Interpretation
+
+The constrained empirical-Bayes update is enforcing the intended RPBC identifying restrictions computationally.
+
+This check does **not** prove identifiability; the mathematical argument is supplied in the manuscript. Instead, it verifies that the software respects the constraints on which that argument depends.
+
+**Result: PASS**
+
+# Equation (15): Adaptive Group-Size Weight
+
+## Manuscript Equation
+
+Adaptive RPBC defines
+
+\[
+w_h = \frac{n_h}{n_h+k},
+\]
+
+with \(k=1\) in the final specification.
+
+For Toy Example 1, \(n_h=5\) for every patient-region group, so
+
+\[
+w_h = \frac{5}{6} = 0.8333333.
+\]
+
+## Numerical Check
+
+```{r toy1-equation15, eval=FALSE}
+fit_adaptive$n_group
+
+fit_adaptive$delta_shrinkage_weight[, 1]
+
+5 / 6
+
+all.equal(
+  as.numeric(
+    fit_adaptive$delta_shrinkage_weight[, 1]
+  ),
+  rep(5 / 6, 8)
+)
+```
+
+Observed output:
+
+```text
+fit_adaptive$n_group
+P1_Core P2_Core P3_Core P4_Core P1_Edge P2_Edge P3_Edge P4_Edge
+      5       5       5       5       5       5       5       5
+
+fit_adaptive$delta_shrinkage_weight[, 1]
+P1_Core   P2_Core   P3_Core   P4_Core   P1_Edge   P2_Edge   P3_Edge   P4_Edge
+0.8333333 0.8333333 0.8333333 0.8333333 0.8333333 0.8333333 0.8333333 0.8333333
+
+5 / 6
+[1] 0.8333333
+
+all.equal(...)
+[1] TRUE
+```
+
+## Interpretation
+
+The implementation reproduces Equation (15) exactly for all eight groups.
+
+**Result: PASS**
+
+# Equations (16)-(17): Log-Scale Stabilization and Bounds
+
+## Manuscript Equations
+
+The unstabilized empirical-Bayes variance multiplier is regularized toward the neutral value 1 on the log scale:
+
+\[
+\log\left(\delta_{hg,S}^{2*}\right)
+=
+w_h
+\log\left(\delta_{hg,EB}^{2*}\right),
+\]
+
+equivalently,
+
+\[
+\delta_{hg,S}^{2*}
+=
+\left(\delta_{hg,EB}^{2*}\right)^{w_h}.
+\]
+
+The stabilized value is then restricted to lower and upper bounds \(L\) and \(U\):
+
+\[
+\delta_{hg,A}^{2*}
+=
+\min\left\{
+U,
+\max\left[
+L,
+\delta_{hg,S}^{2*}
+\right]
+\right\}.
+\]
+
+The final Adaptive RPBC specification uses
+
+\[
+L=0.5,\qquad U=2.0.
+\]
+
+## Independent Reconstruction
+
+```{r toy1-equations16-17, eval=FALSE}
+expected_delta_star <- exp(
+  fit_adaptive$delta_shrinkage_weight *
+    log(fit_adaptive$delta_star_raw)
+)
+
+expected_delta_star <- pmin(
+  pmax(
+    expected_delta_star,
+    fit_adaptive$delta_bounds[1]
+  ),
+  fit_adaptive$delta_bounds[2]
+)
+
+max(
+  abs(
+    fit_adaptive$delta_star -
+      expected_delta_star
+  )
+)
+
+range(fit_adaptive$delta_star)
+
+all(
+  fit_adaptive$delta_star >=
+    fit_adaptive$delta_bounds[1]
+)
+
+all(
+  fit_adaptive$delta_star <=
+    fit_adaptive$delta_bounds[2]
+)
+```
+
+Observed output:
+
+```text
+max(abs(fit_adaptive$delta_star - expected_delta_star))
+[1] 0
+
+range(fit_adaptive$delta_star)
+[1] 0.5 2.0
+
+lower-bound check
+[1] TRUE
+
+upper-bound check
+[1] TRUE
+```
+
+## Interpretation
+
+The independently reconstructed stabilized variance multipliers are **exactly equal** to those returned by the Adaptive engine.
+
+The observed range reaches both 0.5 and 2.0, showing that the bounding mechanism is not merely present in the code; it is actively exercised in this small-sample example.
+
+**Result: PASS**
+
+# Equation (27) Feeding the Adaptive Step
+
+Equation (27) in the common RPBC empirical-Bayes algorithm gives the **unstabilized posterior variance-multiplier update**.
+
+Adaptive RPBC does not replace that update. Instead, it takes the same raw empirical-Bayes result and sends it through Equations (15)-(17) before the variance multiplier is reused.
+
+In the package output:
+
+- `delta_star_raw` stores the raw EB posterior variance-multiplier estimate;
+- `delta_shrinkage_weight` stores \(w_h\);
+- `delta_star` stores the Adaptive-stabilized and bounded variance multiplier.
+
+Thus, the implementation deliberately preserves the distinction
+
+\[
+\text{raw EB update}
+\quad\longrightarrow\quad
+\text{Adaptive stabilization}
+\quad\longrightarrow\quad
+\text{variance multiplier used for harmonization}.
+\]
+
+This distinction is important for both interpretation and software validation.
+
+# Equation (18): Adaptive Harmonization
+
+## Manuscript Equation
+
+After convergence, Adaptive RPBC uses the stabilized variance multiplier in the standardized harmonization step:
+
+\[
+Z_{prjg}^{*,A}
+=
+\frac{
+Z_{prjg}
+-
+\gamma_{pg}^{*}
+-
+\kappa_{pg}^{*}R_r
+}{
+\sqrt{\delta_{pr,g,A}^{2*}}
+}.
+\]
+
+The key Adaptive feature is the denominator: the final correction uses the **stabilized** variance multiplier, not the unstabilized raw EB estimate.
+
+## Independent Reconstruction of Equation (18)
+
+```{r toy1-equation18, eval=FALSE}
+R_check <- ifelse(
+  region == "Edge",
+  1,
+  -1
+)
+
+preserved_mean_check <-
+  outer(
+    fit_adaptive$alpha_hat,
+    rep(1, length(region))
+  ) +
+  outer(
+    fit_adaptive$beta_region_hat,
+    R_check
+  )
+
+s_check <- sweep(
+  dat_adaptive - preserved_mean_check,
+  MARGIN = 1,
+  STATS = sqrt(fit_adaptive$var_pooled),
+  FUN = "/"
+)
+
+patient_region_check <- interaction(
+  factor(patient),
+  factor(region),
+  drop = TRUE,
+  sep = "__"
+)
+
+group_indices_check <- split(
+  seq_along(patient),
+  patient_region_check
+)
+
+expected_harmonized_standardized <- s_check
+
+for (h in seq_along(fit_adaptive$group_names)) {
+
+  group_name <- fit_adaptive$group_names[h]
+
+  idx <- group_indices_check[[group_name]]
+
+  p_index <- match(
+    fit_adaptive$group_patient[h],
+    rownames(fit_adaptive$gamma_star)
+  )
+
+  R_h <- ifelse(
+    fit_adaptive$group_region[h] == "Edge",
+    1,
+    -1
+  )
+
+  nuisance_mean <-
+    fit_adaptive$gamma_star[p_index, ] +
+    fit_adaptive$kappa_star[p_index, ] *
+    R_h
+
+  expected_harmonized_standardized[, idx] <- sweep(
+    s_check[, idx, drop = FALSE],
+    MARGIN = 1,
+    STATS = nuisance_mean,
+    FUN = "-"
+  )
+
+  expected_harmonized_standardized[, idx] <- sweep(
+    expected_harmonized_standardized[, idx, drop = FALSE],
+    MARGIN = 1,
+    STATS = sqrt(
+      fit_adaptive$delta_star[h, ]
+    ),
+    FUN = "/"
+  )
+}
+
+expected_harmonized_data <- sweep(
+  expected_harmonized_standardized,
+  MARGIN = 1,
+  STATS = sqrt(fit_adaptive$var_pooled),
+  FUN = "*"
+) +
+  preserved_mean_check
+
+max(
+  abs(
+    fit_adaptive$data -
+      expected_harmonized_data
+  )
+)
+```
+
+Observed output:
+
+```text
+[1] 0
+```
+
+## Interpretation
+
+The harmonized matrix returned by `.rpbc_fit_matrix_adaptive()` is **exactly identical** to the matrix obtained by independently reconstructing Equation (18) and returning to the original feature scale.
+
+The maximum absolute difference is exactly zero in this validation run.
+
+This is direct theory-to-code evidence that the final Adaptive harmonization step is implemented as specified.
+
+**Result: PASS**
+
+# Preservation of the Population-Average Core-Edge Contrast
+
+## Scientific and Theoretical Target
+
+Under Core \(=-1\) and Edge \(=+1\), the fitted population-average Edge-minus-Core location contrast is
+
+\[
+2\widehat{\beta}_{Rg}.
+\]
+
+Adaptive RPBC does not redefine this estimand. It retains the same protected location component as ordinary RPBC:
+
+\[
+\widehat{\alpha}_g
++
+\widehat{\beta}_{Rg}R_r.
+\]
+
+The Adaptive modification acts on the patient-region scale estimate.
+
+## Patient-Balanced Contrast Function
+
+```{r toy1-patient-balanced-contrast, eval=FALSE}
+patient_balanced_contrast <- function(dat, patient, region) {
+
+  patients <- unique(patient)
+
+  vapply(
+    seq_len(nrow(dat)),
+    function(g) {
+
+      patient_contrasts <- vapply(
+        patients,
+        function(p) {
+
+          mean(
+            dat[
+              g,
+              patient == p &
+                region == "Edge"
+            ]
+          ) -
+            mean(
+              dat[
+                g,
+                patient == p &
+                  region == "Core"
+              ]
+            )
+        },
+        numeric(1)
+      )
+
+      mean(patient_contrasts)
+    },
+    numeric(1)
+  )
+}
+
+contrast_before <- patient_balanced_contrast(
+  dat_adaptive,
+  patient,
+  region
+)
+
+contrast_after <- patient_balanced_contrast(
+  fit_adaptive$data,
+  patient,
+  region
+)
+
+contrast_target <- 2 *
+  fit_adaptive$beta_region_hat
+
+contrast_check <- data.frame(
+  feature = rownames(dat_adaptive),
+  before = contrast_before,
+  after = contrast_after,
+  target = contrast_target,
+  change = contrast_after -
+    contrast_before
+)
+
+contrast_check
+
+max(
+  abs(
+    contrast_after -
+      contrast_before
+  )
+)
+```
+
+Observed output, rounded:
+
+| Feature | Before | After | Fitted Target | Change |
+|:--|--:|--:|--:|--:|
+| Feature1 | 1.3286 | 1.3358 | 1.3286 | 0.0073 |
+| Feature2 | 1.0821 | 1.0545 | 1.0821 | -0.0276 |
+| Feature3 | 1.3023 | 1.3296 | 1.3023 | 0.0273 |
+| Feature4 | 1.0182 | 0.9882 | 1.0182 | -0.0300 |
+| Feature5 | 1.5234 | 1.5010 | 1.5234 | -0.0224 |
+| Feature6 | 0.4559 | 0.4872 | 0.4559 | 0.0313 |
+
+Maximum absolute observed change:
+
+```text
+[1] 0.03126765
+```
+
+## Interpretation
+
+The patient-balanced empirical Core-Edge contrasts remain very close before and after Adaptive RPBC.
+
+The **before** contrast is equal to the fitted target \(2\widehat{\beta}_{Rg}\) in this balanced toy design. After harmonization, small finite-sample differences remain because scale harmonization changes the empirical residual contribution to observed group means.
+
+Accordingly, exact equality of raw before/after empirical sample contrasts is not required. The theoretical preservation statement concerns the model-defined protected location component, which is restored by construction.
+
+The largest observed change here is only about **0.0313**.
+
+**Result: PASS**
+
+# Harmonization of Patient-Region Scale Heterogeneity
+
+## Question
+
+Does Adaptive RPBC reduce deliberately introduced scale heterogeneity across patient-region groups while retaining the protected regional location structure?
+
+## Group-Specific Standard Deviations
+
+```{r toy1-scale-heterogeneity, eval=FALSE}
+group_sd_matrix <- function(dat, patient, region) {
+
+  patient_region <- interaction(
+    factor(patient),
+    factor(region),
+    drop = TRUE,
+    sep = "__"
+  )
+
+  groups <- levels(patient_region)
+
+  out <- sapply(
+    groups,
+    function(gr) {
+
+      idx <- patient_region == gr
+
+      apply(
+        dat[, idx, drop = FALSE],
+        1,
+        sd
+      )
+    }
+  )
+
+  t(out)
+}
+
+sd_before <- group_sd_matrix(
+  dat_adaptive,
+  patient,
+  region
+)
+
+sd_after <- group_sd_matrix(
+  fit_adaptive$data,
+  patient,
+  region
+)
+
+round(sd_before, 3)
+
+round(sd_after, 3)
+```
+
+To summarize scale heterogeneity across groups for each feature, the standard deviation of the log group SDs was calculated:
+
+```{r toy1-scale-summary, eval=FALSE}
+scale_heterogeneity_before <- apply(
+  log(sd_before),
+  2,
+  sd
+)
+
+scale_heterogeneity_after <- apply(
+  log(sd_after),
+  2,
+  sd
+)
+
+scale_check <- data.frame(
+  feature = rownames(dat_adaptive),
+  before = scale_heterogeneity_before,
+  after = scale_heterogeneity_after,
+  reduction =
+    scale_heterogeneity_before -
+    scale_heterogeneity_after
+)
+
+scale_check
+
+mean(scale_heterogeneity_before)
+
+mean(scale_heterogeneity_after)
+```
+
+Observed output:
+
+| Feature | Before | After | Reduction |
+|:--|--:|--:|--:|
+| Feature1 | 0.7130 | 0.5019 | 0.2111 |
+| Feature2 | 0.6423 | 0.4245 | 0.2178 |
+| Feature3 | 0.5285 | 0.2893 | 0.2392 |
+| Feature4 | 0.6066 | 0.3155 | 0.2911 |
+| Feature5 | 0.6076 | 0.3954 | 0.2122 |
+| Feature6 | 0.6379 | 0.3636 | 0.2742 |
+
+Mean scale heterogeneity:
+
+```text
+Before: 0.6226428
+After:  0.3817055
+```
+
+## Interpretation
+
+Scale heterogeneity decreased for **all six features**.
+
+The mean log-SD heterogeneity fell from approximately **0.623 to 0.382**.
+
+This demonstrates the intended balance of Adaptive RPBC in a small-\(n\) setting: patient-region scale differences are harmonized, but the scale adjustment is stabilized rather than allowing noisy small-group variance estimates to drive unrestricted correction.
+
+**Result: PASS**
+
+# Toy Example 1 Summary
+
+Toy Example 1 demonstrates that, with only 5 cells per patient-region group:
+
+- all six features converge;
+- the identifying constraints are enforced to machine precision;
+- Equation (15) is reproduced exactly;
+- Equations (16)-(17) are reproduced exactly;
+- the bounding mechanism is actively used;
+- Equation (18) is reproduced exactly by an independent reconstruction;
+- the patient-balanced Core-Edge contrast remains closely retained;
+- patient-region scale heterogeneity decreases for every feature.
+
+The example therefore validates both the **mechanics** and the **scientific behavior** of Adaptive RPBC in a deliberately small-sample setting.
+
+# Toy Example 2: Group-Size Dependence of Adaptive Stabilization
+
+## Scientific Question
+
+Does Adaptive RPBC regularize smaller patient-region groups more strongly and larger groups less strongly, exactly as Equation (15) intends?
+
+Toy Example 2 is deliberately focused. It does not repeat every Toy Example 1 check. Instead, it isolates the defining Adaptive mechanism by using unequal patient-region sample sizes.
+
+The group sizes are
+
+\[
+3,\;5,\;8,\;12,\;15,\;20,\;25,\;30.
+\]
+
+## Unequal Group Sizes
+
+```{r toy2-group-structure, eval=FALSE}
+set.seed(20261008)
+
+group_info2 <- data.frame(
+  patient = c(
+    "P1", "P1",
+    "P2", "P2",
+    "P3", "P3",
+    "P4", "P4"
+  ),
+  region = c(
+    "Core", "Edge",
+    "Core", "Edge",
+    "Core", "Edge",
+    "Core", "Edge"
+  ),
+  n = c(
+    3, 5,
+    8, 12,
+    15, 20,
+    25, 30
+  )
+)
+
+patient2 <- rep(
+  group_info2$patient,
+  times = group_info2$n
+)
+
+region2 <- rep(
+  group_info2$region,
+  times = group_info2$n
+)
+
+table(patient2, region2)
+```
+
+## Generate Toy Example 2
+
+```{r toy2-generate-data, eval=FALSE}
+n_cells2 <- length(patient2)
+
+dat_adaptive2 <- matrix(
+  NA_real_,
+  nrow = n_features,
+  ncol = n_cells2
+)
+
+rownames(dat_adaptive2) <- paste0(
+  "Feature",
+  seq_len(n_features)
+)
+
+cell_counter <- 1L
+
+for (h in seq_len(nrow(group_info2))) {
+
+  p <- group_info2$patient[h]
+  r <- group_info2$region[h]
+  nh <- group_info2$n[h]
+
+  R_code <- ifelse(
+    r == "Edge",
+    1,
+    -1
+  )
+
+  sd_h <- group_sd[
+    paste0(p, "_", r)
+  ]
+
+  idx <- cell_counter:(
+    cell_counter + nh - 1L
+  )
+
+  for (g in seq_len(n_features)) {
+
+    mu <- alpha[g] +
+      beta_region[g] * R_code +
+      gamma_true[p, g] +
+      kappa_true[p, g] * R_code
+
+    dat_adaptive2[g, idx] <- rnorm(
+      nh,
+      mean = mu,
+      sd = sd_h
+    )
+  }
+
+  cell_counter <- cell_counter + nh
+}
+
+dim(dat_adaptive2)
+```
+
+Observed output:
+
+```text
+[1]   6 118
+```
+
+## Run Adaptive RPBC
+
+```{r toy2-fit, eval=FALSE}
+fit_adaptive2 <- .rpbc_fit_matrix_adaptive(
+  dat = dat_adaptive2,
+  patient = patient2,
+  region = region2,
+  core_level = "Core",
+  edge_level = "Edge"
+)
+
+fit_adaptive2$converged
+
+fit_adaptive2$iterations
+```
+
+Observed output:
+
+```text
+fit_adaptive2$converged
+[1] TRUE TRUE TRUE TRUE TRUE TRUE
+
+fit_adaptive2$iterations
+[1] 4 5 3 4 4 3
+```
+
+All features converged.
+
+**Result: PASS**
+
+# Equation (15) Across Unequal Group Sizes
+
+## Expected Versus Observed Weights
+
+```{r toy2-equation15, eval=FALSE}
+weight_check2 <- data.frame(
+  group = fit_adaptive2$group_names,
+  n = fit_adaptive2$n_group,
+  expected_weight =
+    fit_adaptive2$n_group /
+    (fit_adaptive2$n_group + 1),
+  observed_weight =
+    fit_adaptive2$delta_shrinkage_weight[, 1]
+)
+
+weight_check2
+
+all.equal(
+  weight_check2$expected_weight,
+  weight_check2$observed_weight
+)
+```
+
+Observed result:
+
+```text
+[1] TRUE
+```
+
+Thus, the software-generated weights agree exactly with Equation (15).
+
+## Correct Monotonicity Check
+
+To examine the relationship between sample size and Adaptive weight, the rows must first be ordered by \(n_h\).
+
+```{r toy2-monotonic-weight-check, eval=FALSE}
+weight_check2_sorted <- weight_check2[
+  order(weight_check2$n),
+]
+
+weight_check2_sorted
+
+all(
+  diff(
+    weight_check2_sorted$observed_weight
+  ) > 0
+)
+```
+
+Observed sorted values:
+
+| \(n_h\) | \(w_h\) |
+|--:|--:|
+| 3 | 0.7500000 |
+| 5 | 0.8333333 |
+| 8 | 0.8888889 |
+| 12 | 0.9230769 |
+| 15 | 0.9375000 |
+| 20 | 0.9523810 |
+| 25 | 0.9615385 |
+| 30 | 0.9677419 |
+
+Observed monotonicity check:
+
+```text
+[1] TRUE
+```
+
+## Interpretation
+
+The Adaptive weight increases monotonically with patient-region group size.
+
+Therefore,
+
+\[
+n_h \uparrow
+\quad\Longrightarrow\quad
+w_h \uparrow.
+\]
+
+Because the stabilized variance multiplier is obtained by raising the raw multiplier to the power \(w_h\), a smaller \(w_h\) produces stronger movement toward 1, whereas a weight closer to 1 leaves the raw EB estimate more nearly unchanged.
+
+**Result: PASS**
+
+# Direct Sampling-Stability Demonstration
+
+## Question
+
+If the raw variance-multiplier estimate is held fixed, how does sample size alone change the strength of stabilization?
+
+To isolate this mechanism, set the same raw value
+
+\[
+\delta^2_{\text{raw}} = 1.8
+\]
+
+for every group and apply only the group-size-dependent stabilization.
+
+```{r toy2-sampling-stability-demo, eval=FALSE}
+raw_delta_demo <- 1.80
+
+stabilization_demo <- data.frame(
+  n = weight_check2_sorted$n,
+  weight = weight_check2_sorted$observed_weight
+)
+
+stabilization_demo$raw_delta <- raw_delta_demo
+
+stabilization_demo$stabilized_delta <- exp(
+  stabilization_demo$weight *
+    log(raw_delta_demo)
+)
+
+stabilization_demo
+
+all(
+  diff(
+    stabilization_demo$stabilized_delta
+  ) > 0
+)
+```
+
+Observed output:
+
+| \(n_h\) | Weight | Raw \(\delta^2\) | Stabilized \(\delta^2\) |
+|--:|--:|--:|--:|
+| 3 | 0.7500000 | 1.8 | 1.554012 |
+| 5 | 0.8333333 | 1.8 | 1.632026 |
+| 8 | 0.8888889 | 1.8 | 1.686199 |
+| 12 | 0.9230769 | 1.8 | 1.720427 |
+| 15 | 0.9375000 | 1.8 | 1.735074 |
+| 20 | 0.9523810 | 1.8 | 1.750317 |
+| 25 | 0.9615385 | 1.8 | 1.759764 |
+| 30 | 0.9677419 | 1.8 | 1.766192 |
+
+Monotonicity check:
+
+```text
+[1] TRUE
+```
+
+## Interpretation
+
+This table makes the central Adaptive idea visible.
+
+When \(n_h=3\), the raw value 1.8 is pulled substantially toward 1, producing approximately 1.554.
+
+When \(n_h=30\), the same raw value is considered more stable and is changed much less, remaining at approximately 1.766.
+
+Thus:
+
+\[
+\boxed{
+\text{small } n_h
+\rightarrow
+\text{stronger regularization}
+}
+\]
+
+and
+
+\[
+\boxed{
+\text{large } n_h
+\rightarrow
+\text{greater trust in the raw EB scale estimate}
+}
+\]
+
+This is the core statistical intuition behind Adaptive RPBC.
+
+**Result: PASS**
+
+# Theory-to-Code Validation Map
+
+| Theory / manuscript target | Software object or operation | Numerical evidence | Result |
+|:--|:--|:--|:--|
+| Paired Core/Edge design | `patient`, `region`, design matrix | Every patient contributes both regions | **PASS** |
+| Equation (8): location identifying constraints | `gamma_star`, `kappa_star` | Column sums approximately \(10^{-16}\) or smaller | **PASS** |
+| Section 2.5.1 constrained-model identifiability requirements | Sum-to-zero coding + paired design + full-rank check | Software enforces required constraints/design checks | **PASS** |
+| Equation (15): \(w_h=n_h/(n_h+1)\) | `delta_shrinkage_weight` | Exact equality in both toy examples | **PASS** |
+| Equation (16): log-scale stabilization | `exp(w * log(delta_star_raw))` | Maximum difference from returned stabilized values = 0 | **PASS** |
+| Equation (17): bounds | `delta_bounds = c(0.5, 2.0)` | All values inside bounds; range reached 0.5 to 2.0 | **PASS** |
+| Equation (27): raw EB scale update | `delta_star_raw` | Kept separately before Adaptive stabilization | **TRACE VERIFIED** |
+| Equation (18): Adaptive harmonization | nuisance subtraction + division by `sqrt(delta_star)` | Independent reconstruction differs by 0 | **PASS** |
+| Protected regional estimand | \(2\widehat{\beta}_{Rg}\) | Maximum empirical before/after contrast change about 0.0313 | **PASS** |
+| Patient-region scale harmonization | group-specific SDs | Mean log-SD heterogeneity fell from 0.623 to 0.382 | **PASS** |
+| Sampling-stability principle | unequal \(n_h\) in Toy 2 | Smaller groups receive smaller weights and stronger pull toward 1 | **PASS** |
+
+# Overall Validation Summary
+
+| Validation Target | Question | Result |
+|:--|:--|:--|
+| Package loading | Does the completed Adaptive engine load successfully? | **PASS** |
+| Execution | Does the engine return a finite harmonized matrix of the expected size? | **PASS** |
+| Convergence | Do all features converge in both toy examples? | **PASS** |
+| Identifiability constraints | Are the posterior patient and interaction effects sum-to-zero? | **PASS** |
+| Equation (15) | Are Adaptive weights computed exactly from group size? | **PASS** |
+| Equations (16)-(17) | Are raw EB variance multipliers stabilized and bounded exactly as specified? | **PASS** |
+| Equation (18) | Does independent reconstruction reproduce the returned harmonized data exactly? | **PASS** |
+| Regional preservation | Is the patient-balanced population-average Core-Edge signal closely retained? | **PASS** |
+| Scale harmonization | Is patient-region scale heterogeneity reduced? | **PASS** |
+| Adaptive sample-size behavior | Do smaller groups receive stronger stabilization than larger groups? | **PASS** |
+
+# Bottom Line
+
+In these controlled numerical experiments, the **Adaptive RPBC engine behaves consistently with its intended mathematical and statistical design**.
+
+The validation shows that Adaptive RPBC:
+
+1. retains the ordinary RPBC location model and identifying constraints;
+2. converges successfully in both small equal-\(n\) and unequal-\(n\) settings;
+3. implements Equation (15) exactly;
+4. reproduces the log-scale stabilization and bounding operations in Equations (16)-(17) exactly;
+5. uses the stabilized variance multiplier in Equation (18) exactly;
+6. closely retains the population-average Core-Edge location contrast;
+7. reduces patient-region scale heterogeneity; and
+8. regularizes small-group scale estimates more strongly than large-group estimates, consistent with the sampling-stability motivation of the Adaptive extension.
+
+The central Adaptive principle is therefore visible both mathematically and computationally:
+
+\[
+\boxed{
+\text{less information}
+\rightarrow
+\text{stronger stabilization}
+\rightarrow
+\text{greater protection against noisy scale estimates}
+}
+\]
+
+while
+
+\[
+\boxed{
+\text{more information}
+\rightarrow
+\text{less stabilization}
+\rightarrow
+\text{greater reliance on the raw EB estimate}
+}
+\]
+
+# What This Tutorial Does and Does Not Establish
+
+This document provides a **theory-to-code validation record**.
+
+It shows that the implementation obeys the mathematical transformations, constraints, and preservation logic that were explicitly checked.
+
+It does **not**, by itself, prove the theoretical results or establish universal statistical performance. Those questions belong to:
+
+- the mathematical arguments in the Methods;
+- the controlled simulation study;
+- the development-stage sensitivity analyses;
+- the independent comparative evaluation; and
+- the empirical IMC and scRNA-seq analyses.
+
+This distinction is important. A method can have correct theory but an incorrect implementation, or correct code in one toy setting without a general theoretical guarantee. The purpose of this tutorial is to document the bridge between those layers.
+
+# Package-Development and Tutorial Note
+
+This `.Rmd` file is intended to serve as a **human-readable mathematical validation tutorial and development record**.
+
+It can also serve as a companion for readers who want to understand the Adaptive RPBC manuscript by following the equations directly into R code.
+
+It is distinct from:
+
+- `tests/testthat/`, which should contain automated regression tests that protect the package against future code changes;
+- `?rpbc`, which should provide concise function-level documentation and examples; and
+- a streamlined package vignette, which may later reuse selected portions of this material for end users.
+
+The code chunks in this version use `eval = FALSE`. This preserves the exact validation record generated during the interactive package-development session and allows the document to knit without rerunning the simulations.
+
+Later, selected chunks may be converted to executable chunks if a fully self-reproducing vignette is desired.
+
+# Suggested Companion Tutorial
+
+The corresponding ordinary RPBC validation document may be titled:
+
+**Theory-to-Code Validation of RPBC: Equations, Lemmas, and Preservation Properties**
+
+Together, the two tutorials provide a structured bridge from the RPBC manuscript to the package implementation:
+
+- ordinary RPBC establishes the common constrained location-scale framework and preservation target;
+- Adaptive RPBC retains that framework while introducing group-size-dependent scale stabilization.

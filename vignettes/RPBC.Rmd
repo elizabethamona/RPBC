@@ -1,0 +1,308 @@
+---
+title: "RPBC: Region-Preserving Batch Correction"
+
+author:
+  - name: "Elizabeth B. Amona, PhD"
+    affiliation: "Biostatistics Core, Brown Cancer Center, University of Louisville, Louisville, KY, USA"
+    email: "amonaelizabeth1@gmail.com"
+    orcid: "0000-0002-7575-788X"
+
+date: "Last updated: `r format(Sys.Date(), '%d %B %Y')`"
+
+output:
+  BiocStyle::html_document:
+    toc: true
+    toc_depth: 2
+
+vignette: >
+  %\VignetteIndexEntry{RPBC: Region-Preserving Batch Correction}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  warning = FALSE,
+  message = FALSE
+)
+```
+
+```{r load-package}
+library(RPBC)
+```
+
+# Overview
+
+Region-Preserving Batch Correction (RPBC) is designed for paired
+region-resolved single-cell and spatial molecular data in which
+patient-associated nuisance variation should be reduced while preserving a
+prespecified population-average regional effect.
+
+RPBC supports three related workflows:
+
+- **Ordinary RPBC**, for paired region-resolved data without additional
+  patient-level covariates;
+- **Adaptive RPBC**, which introduces group-size-dependent stabilization of
+  patient-region scale adjustments; and
+- **Covariate-adjusted RPBC**, which protects specified patient-level
+  covariates while harmonizing residual patient-associated variation.
+
+The primary user interface is `rpbc()`. It accepts either a
+`SingleCellExperiment` or `SpatialExperiment` object and returns the input
+object with the harmonized expression matrix stored as a new assay.
+
+Package version: `r as.character(packageVersion("RPBC"))`
+
+# Example dataset
+
+The package includes `haley_gbm_example`, a representative subset of a
+published glioblastoma imaging mass cytometry (IMC) dataset. The example retains
+all seven patients included in the RPBC real-world application and preserves the
+paired Core/Edge design, with 30 cells sampled from each patient-region combination.
+
+The object contains 420 cells and 10 representative biological markers.
+Raw IMC intensities are stored in the `"counts"` assay.
+
+```{r load-data}
+data("haley_gbm_example", package = "RPBC")
+
+haley_gbm_example
+dim(haley_gbm_example)
+SummarizedExperiment::assayNames(haley_gbm_example)
+```
+
+The paired patient-region structure can be inspected directly from the
+cell-level metadata.
+
+```{r inspect-design}
+table(
+  haley_gbm_example$patient_id,
+  haley_gbm_example$region_type
+)
+```
+
+Each of the seven patients contributes cells from both Core and Edge,
+satisfying the paired regional structure required by RPBC.
+
+The example data are derived from:
+
+Haley MJ, et al. (2024). *Hypoxia coordinates the spatial landscape of
+myeloid cells within glioblastoma to affect survival*. **Science Advances**,
+10(20), eadj3301. doi:10.1126/sciadv.adj3301.
+
+Haley M, Couper K. (2024). *Imaging mass cytometry data from IDH wildtype
+glioblastomas*. Dryad. doi:10.5061/dryad.2z34tmprw.
+
+# Input assay and transformation
+
+RPBC separates assay selection from transformation through the
+`assay_name` and `transform` arguments.
+
+The available transformations are:
+
+- `"none"`: use the selected assay exactly as supplied;
+- `"asinh"`: apply `asinh(x / cofactor)`;
+- `"log1p"`: apply `log(x + 1)` to non-negative values.
+
+For the bundled IMC example, the `"counts"` assay contains raw intensities,
+so the analyses below use:
+
+```r
+transform = "asinh"
+cofactor = 5
+```
+
+If an assay has already been appropriately normalized and transformed,
+such as a sequencing `"logcounts"` assay, it can instead be supplied with
+`transform = "none"`.
+
+The `"log1p"` option performs only the transformation `log(x + 1)`; it is
+not a replacement for sequencing-data normalization.
+
+# Ordinary RPBC
+
+Ordinary RPBC is the base workflow for a paired region-resolved design.
+RPBC harmonizes patient and patient-by-region nuisance components while
+retaining the population-average Core/Edge regional effect.
+
+```{r ordinary-rpbc}
+example_ordinary <- rpbc(
+  object = haley_gbm_example,
+  patient = "patient_id",
+  region = "region_type",
+  assay_name = "counts",
+  transform = "asinh",
+  cofactor = 5,
+  adaptive = FALSE,
+  output_assay = "rpbc"
+)
+
+SummarizedExperiment::assayNames(example_ordinary)
+```
+
+The original `"counts"` assay remains available, while the harmonized
+values are stored in the new `"rpbc"` assay.
+
+```{r ordinary-output}
+dim(
+  SummarizedExperiment::assay(
+    example_ordinary,
+    "rpbc"
+  )
+)
+```
+
+# Adaptive RPBC
+
+Adaptive RPBC uses the same paired biological target but incorporates
+group-size-dependent stabilization into the patient-region scale
+adjustment.
+
+```{r adaptive-rpbc}
+example_adaptive <- rpbc(
+  object = haley_gbm_example,
+  patient = "patient_id",
+  region = "region_type",
+  assay_name = "counts",
+  transform = "asinh",
+  cofactor = 5,
+  adaptive = TRUE,
+  output_assay = "rpbc_adaptive"
+)
+
+SummarizedExperiment::assayNames(example_adaptive)
+```
+
+The bundled example is deliberately balanced at 30 cells per
+patient-region combination. It therefore demonstrates the Adaptive RPBC
+interface and output structure rather than the effect of unequal
+patient-region sample sizes.
+
+The Adaptive RPBC defaults are:
+
+```r
+delta_adaptive_k = 1
+delta_bounds = c(0.5, 2)
+```
+
+and can be modified through `rpbc()` when appropriate.
+
+# Covariate-adjusted RPBC
+
+Covariate-adjusted RPBC is used when patient-level variables should be
+retained as part of the preserved mean structure. Covariates supplied
+through `covariates` must be constant within patient.
+
+The Haley example contains patient age and sex, so both are included below.
+
+```{r covariate-rpbc}
+example_covariate <- rpbc(
+  object = haley_gbm_example,
+  patient = "patient_id",
+  region = "region_type",
+  assay_name = "counts",
+  transform = "asinh",
+  cofactor = 5,
+  covariates = c("age", "sex"),
+  adaptive = FALSE,
+  output_assay = "rpbc_covariate"
+)
+
+SummarizedExperiment::assayNames(example_covariate)
+```
+
+The harmonized expression matrix is stored in `"rpbc_covariate"`.
+
+```{r covariate-output}
+dim(
+  SummarizedExperiment::assay(
+    example_covariate,
+    "rpbc_covariate"
+  )
+)
+```
+
+Adaptive RPBC and covariate-adjusted RPBC are currently implemented as
+separate extensions and therefore should not be requested simultaneously.
+
+# Accessing harmonized values
+
+The harmonized matrix can be accessed using the standard
+`SummarizedExperiment` assay interface. For example:
+
+```{r access-output}
+rpbc_matrix <- SummarizedExperiment::assay(
+  example_ordinary,
+  "rpbc"
+)
+
+rpbc_matrix[1:5, 1:5]
+```
+
+The matrix retains the same marker-by-cell dimensions and dimnames as the
+selected input assay, allowing the harmonized values to be used in
+downstream single-cell or spatial analyses.
+
+RPBC does not prescribe a particular downstream workflow. Dimensionality
+reduction, clustering, visualization, differential analyses, or other
+biological analyses can therefore be performed using methods appropriate
+for the study after harmonization.
+
+# Choosing an RPBC workflow
+
+The three workflows address related but distinct analysis settings.
+
+**Ordinary RPBC** is appropriate when the primary objective is to reduce
+patient and patient-by-region nuisance variation while preserving the
+population-average regional effect and no additional patient-level
+covariates need to be protected.
+
+**Adaptive RPBC** is appropriate when group-size-dependent stabilization
+of patient-region scale adjustment is desired, particularly in designs
+with unequal patient-region sample sizes.
+
+**Covariate-adjusted RPBC** is appropriate when known patient-level
+covariates, such as age or sex, should remain part of the protected mean
+structure during harmonization.
+
+Only one of the Adaptive or covariate-adjusted extensions should currently
+be used in a single RPBC call.
+
+# Additional fit information
+
+By default, `rpbc()` returns the modified Bioconductor object. Users who
+require internal fitted quantities or convergence information can set:
+
+```r
+return_fit = TRUE
+```
+
+The result is then a list containing the harmonized object in `object` and
+the fitted RPBC quantities in `fit`.
+
+For example:
+
+```{r return-fit}
+example_fit <- rpbc(
+  object = haley_gbm_example,
+  patient = "patient_id",
+  region = "region_type",
+  assay_name = "counts",
+  transform = "asinh",
+  cofactor = 5,
+  adaptive = FALSE,
+  output_assay = "rpbc_fit_example",
+  return_fit = TRUE
+)
+
+names(example_fit)
+all(example_fit$fit$converged)
+```
+
+# Session information
+
+```{r session-info}
+sessionInfo()
+```

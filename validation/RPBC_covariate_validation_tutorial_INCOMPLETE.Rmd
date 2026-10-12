@@ -1,0 +1,1115 @@
+---
+title: "Covariate-Adjusted RPBC: Theory-to-Code Validation Tutorial"
+author: "Elizabeth B. Amona, PhD"
+date: "October 7, 2026"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+    code_folding: show
+---
+
+# Purpose
+
+This tutorial documents the statistical motivation, implementation, and controlled numerical validation of the **covariate-adjusted Region-Preserving Batch Correction (RPBC)** engine.
+
+The goal is not merely to show that the code runs. The tutorial connects the covariate-adjusted implementation directly to the mathematical structure of RPBC and asks whether the software behaves consistently with the intended preservation target and identifying restrictions.
+
+The central questions are:
+
+- How does covariate-adjusted RPBC extend ordinary RPBC?
+- Why are patient-level covariates included in the protected location component?
+- Why is the residual patient effect restricted to the orthogonal complement of the covariate space?
+- Does the implementation construct the patient-level covariate design correctly?
+- Does it enforce \(X_0^T\gamma_g=0\) numerically?
+- Does it retain the usual sum-to-zero constraint for the patient-by-region interaction?
+- Does the constrained empirical-Bayes update preserve those restrictions after estimation?
+- Does the harmonized output preserve dimensions, names, and finite values?
+- Does covariate-adjusted RPBC continue to use the ordinary RPBC scale update rather than the Adaptive stabilization rule?
+
+> **Important:** These controlled examples provide implementation-level numerical validation. They complement, but do not replace, the mathematical results, simulation studies, and real-data analyses in the RPBC manuscript.
+
+# How This Tutorial Connects to the RPBC Manuscript
+
+Equation numbering follows the current RPBC manuscript used during package development.
+
+| Manuscript component | Role in the method | Validation connection |
+|:--|:--|:--|
+| Equation (5) | Core \(=-1\), Edge \(=+1\) coding | Used throughout the simulated paired design |
+| Equation (6) | Basic RPBC location-scale model | Provides the ordinary RPBC foundation |
+| Equation (8) | Ordinary sum-to-zero identifying constraints | Retained for the patient-by-region interaction |
+| Equation (9) | Ordinary protected location component | Extended by the covariate-adjusted formulation |
+| Equations (11)-(14) | Covariate-adjusted RPBC model and protected mean | Define the systematic covariate component to preserve |
+| Equation (19) | Pooled feature variance | Used in standardization |
+| Equations (20)-(21) | Empirical-Bayes hyperparameters | Used for patient and interaction effects |
+| Equations (23)-(25) | Joint posterior and constrained posterior update | Extended to the \(X_0^T\gamma_g=0\) restriction |
+| Equation (26) | Patient-region residual sum of squares | Used in the scale update |
+| Equation (27) | Ordinary EB variance-multiplier update | Used here without Adaptive stabilization |
+| Equation (31) | Covariate-adjusted constrained update | Checked through the posterior identifying restrictions |
+| Equation (32) | Covariate-adjusted RPBC transformation | Reflected in the final harmonized output |
+
+# Statistical Model
+
+For feature \(g\), patient \(p\), region \(r\), and cell \(j\), the covariate-adjusted RPBC location-scale model is
+
+\[
+Y_{prjg}
+=
+\alpha_g
++
+\beta_{Rg}R_r
++
+x_p^T\beta_{Xg}
++
+\gamma_{pg}
++
+\kappa_{pg}R_r
++
+\delta_{pr,g}\epsilon_{prjg}.
+\]
+
+Here:
+
+- \(\alpha_g\) is the feature-specific intercept;
+- \(R_r\in\{-1,+1\}\) codes Core and Edge;
+- \(x_p\) is the vector of patient-level covariates;
+- \(\beta_{Xg}\) contains the systematic covariate coefficients;
+- \(\gamma_{pg}\) is the residual patient-specific nuisance effect;
+- \(\kappa_{pg}\) is the patient-specific deviation from the population-average regional effect;
+- \(\delta_{pr,g}^2\) is the patient-region residual variance multiplier.
+
+The population-average regional effect remains represented by \(\beta_{Rg}\).
+
+# What Covariate Adjustment Changes
+
+Ordinary RPBC protects
+
+\[
+\alpha_g+\beta_{Rg}R_r.
+\]
+
+Covariate-adjusted RPBC instead protects
+
+\[
+\alpha_g+\beta_{Rg}R_r+x_p^T\beta_{Xg}.
+\]
+
+This distinction is fundamental.
+
+A patient-level variable such as age or sex may explain systematic biological or clinical variation. If that systematic variation is included as a prespecified covariate, it should not be absorbed into the nuisance patient effect and removed during harmonization.
+
+Therefore the covariate-adjusted method separates:
+
+\[
+\text{systematic patient-level variation}
+\]
+
+from
+
+\[
+\text{residual patient nuisance variation}.
+\]
+
+# Why the Covariate Matrix Is Centered
+
+Let \(X\) denote the patient-level covariate design after categorical variables have been expanded.
+
+RPBC centers every column of \(X\) equally across patients. The augmented patient-level design is then
+
+\[
+X_0=[\mathbf{1},X].
+\]
+
+Centering makes the covariate columns orthogonal to the intercept in the patient-balanced design and gives the intercept a clear population-average interpretation.
+
+This is a patient-level operation. A patient with many cells should not receive more weight in the centering step simply because more cells were observed.
+
+# Why the Residual Patient Effect Must Be Orthogonal to the Covariates
+
+If the residual patient effect were unrestricted, it could reproduce variation already represented by the intercept and covariates.
+
+That would make the decomposition between
+
+\[
+x_p^T\beta_{Xg}
+\]
+
+and
+
+\[
+\gamma_{pg}
+\]
+
+non-identifiable.
+
+Covariate-adjusted RPBC therefore imposes
+
+\[
+X_0^T\gamma_g=0.
+\]
+
+The residual patient effect is parameterized in
+
+\[
+\mathrm{Null}(X_0^T).
+\]
+
+This means that \(\gamma_g\) contains only patient-specific variation that cannot be represented by the protected intercept/covariate space.
+
+The patient-by-region interaction retains the ordinary RPBC restriction
+
+\[
+\sum_p \kappa_{pg}=0.
+\]
+
+# Why Covariate-Adjusted RPBC Is Still RPBC
+
+Covariate-adjusted RPBC is not a separate public method. It is the same RPBC framework with an optional patient-level systematic component.
+
+Conceptually:
+
+\[
+\text{RPBC}
+=
+\begin{cases}
+\text{ordinary RPBC}, & \text{if covariates are absent},\\
+\text{covariate-adjusted RPBC}, & \text{if covariates are supplied}.
+\end{cases}
+\]
+
+In the package engine this is implemented through
+
+```r
+covariates = NULL
+```
+
+for ordinary RPBC and a supplied patient-level covariate object for the adjusted analysis.
+
+# Package Setup
+
+```{r setup, message=FALSE, warning=FALSE}
+devtools::load_all()
+
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE
+)
+```
+
+# Controlled Validation Example
+
+## Design
+
+The validation example uses:
+
+- 6 patients;
+- paired Core and Edge regions;
+- 4 cells per patient-region group;
+- 20 features;
+- a continuous patient-level covariate: age;
+- a categorical patient-level covariate: sex;
+- a population-average regional effect;
+- systematic covariate effects;
+- random residual variation.
+
+This creates
+
+\[
+6\times2\times4=48
+\]
+
+cells.
+
+```{r design}
+set.seed(2026)
+
+n_patients <- 6L
+cells_per_region <- 4L
+n_features <- 20L
+
+patient_levels <- paste0(
+  "P",
+  seq_len(n_patients)
+)
+
+patient <- factor(
+  rep(
+    patient_levels,
+    each = 2L * cells_per_region
+  ),
+  levels = patient_levels
+)
+
+region <- factor(
+  rep(
+    rep(
+      c("Core", "Edge"),
+      each = cells_per_region
+    ),
+    times = n_patients
+  ),
+  levels = c("Core", "Edge")
+)
+
+table(patient, region)
+```
+
+Every patient contributes observations from both prespecified regions.
+
+# Patient-Level Covariates
+
+```{r patient-covariates}
+covariates <- data.frame(
+  age = c(
+    45,
+    52,
+    61,
+    48,
+    57,
+    66
+  ),
+  sex = factor(
+    c(
+      "F",
+      "M",
+      "F",
+      "M",
+      "F",
+      "M"
+    ),
+    levels = c(
+      "F",
+      "M"
+    )
+  ),
+  row.names = patient_levels
+)
+
+covariates
+```
+
+There are two original patient-level variables.
+
+After `model.matrix()` coding:
+
+- age contributes one numeric design column;
+- sex contributes one indicator column because it has two levels.
+
+Therefore
+
+\[
+q=2.
+\]
+
+With \(P=6\) patients,
+
+\[
+\mathrm{dim}\{\mathrm{Null}(X_0^T)\}
+=
+P-(q+1)
+=
+6-3
+=
+3.
+\]
+
+So the residual patient effect has three degrees of freedom in this example.
+
+# Simulated Feature-by-Cell Data
+
+```{r simulate-data}
+n_cells <- length(patient)
+
+age_centered <- covariates$age -
+  mean(covariates$age)
+
+sex_numeric <- as.numeric(
+  covariates$sex == "M"
+)
+
+patient_index <- match(
+  as.character(patient),
+  patient_levels
+)
+
+region_code <- ifelse(
+  region == "Edge",
+  1,
+  -1
+)
+
+dat <- matrix(
+  rnorm(
+    n_features * n_cells,
+    mean = 0,
+    sd = 0.8
+  ),
+  nrow = n_features,
+  ncol = n_cells
+)
+
+rownames(dat) <- paste0(
+  "Feature",
+  seq_len(n_features)
+)
+
+colnames(dat) <- paste0(
+  "Cell",
+  seq_len(n_cells)
+)
+
+for (g in seq_len(n_features)) {
+
+  dat[g, ] <- dat[g, ] +
+    5 +
+    0.5 * region_code +
+    0.04 * age_centered[patient_index] +
+    0.35 * sex_numeric[patient_index]
+}
+
+dim(dat)
+```
+
+The simulated mean contains a population-average regional component together with systematic age and sex contributions.
+
+# Fit Covariate-Adjusted RPBC
+
+```{r fit-covariate-rpbc}
+fit_cov <- .rpbc_fit_matrix(
+  dat = dat,
+  patient = patient,
+  region = region,
+  covariates = covariates,
+  core_level = "Core",
+  edge_level = "Edge"
+)
+```
+
+# Confirm That the Covariate Branch Was Used
+
+```{r mode-check}
+fit_cov$covariate_adjusted
+
+fit_cov$q_covariates
+
+fit_cov$residual_patient_df
+```
+
+The expected results are:
+
+- `covariate_adjusted = TRUE`;
+- `q_covariates = 2`;
+- `residual_patient_df = 3`.
+
+These values verify that the engine recognized the supplied covariates and allocated the expected number of residual patient degrees of freedom.
+
+# Inspect the Patient-Level Covariate Design
+
+```{r inspect-x}
+fit_cov$covariate_design_patient
+
+fit_cov$augmented_design_patient
+
+fit_cov$covariate_design_names
+
+fit_cov$covariate_original_names
+```
+
+The design returned by the engine separates the user-supplied variables from the coded design columns.
+
+This distinction matters because a categorical variable may generate more than one design column in a general analysis.
+
+# Verify Equal-Patient Centering
+
+The coded covariate matrix should be centered equally across patients:
+
+\[
+\frac{1}{P}\sum_{p=1}^{P}X_{pk}=0
+\]
+
+for each design column \(k\).
+
+```{r centered-x}
+colMeans(
+  fit_cov$covariate_design_patient
+)
+```
+
+Numerically these values should be approximately zero, up to floating-point precision.
+
+```{r centered-x-pass}
+stopifnot(
+  max(
+    abs(
+      colMeans(
+        fit_cov$covariate_design_patient
+      )
+    )
+  ) < 1e-10
+)
+
+cat("Centered patient-level covariate design: PASS\n")
+```
+
+# Constructing the Residual Patient Null Space
+
+The residual patient effect is represented using a basis \(Q_\perp\) for
+
+\[
+\mathrm{Null}(X_0^T).
+\]
+
+Therefore
+
+\[
+X_0^TQ_\perp=0.
+\]
+
+```{r nullspace-check}
+fit_cov$nullspace_error
+
+nullspace_check <- t(
+  fit_cov$augmented_design_patient
+) %*%
+  fit_cov$residual_patient_basis
+
+nullspace_check
+
+max(
+  abs(
+    nullspace_check
+  )
+)
+```
+
+The maximum absolute value should be near machine precision.
+
+```{r nullspace-pass}
+stopifnot(
+  fit_cov$nullspace_error < 1e-8
+)
+
+cat("Residual patient null-space construction: PASS\n")
+```
+
+# Full Location Model
+
+The covariate-adjusted location model fitted by the engine contains:
+
+\[
+[\mathbf 1,\;R,\;X,\;Q_\perp,\;PR].
+\]
+
+The columns correspond to:
+
+1. intercept;
+2. population-average region effect;
+3. protected patient-level covariates;
+4. residual patient basis;
+5. patient-by-region interaction basis.
+
+The full model must be identifiable.
+
+```{r design-rank}
+fit_cov$design_rank
+
+fit_cov$design_columns
+
+stopifnot(
+  fit_cov$design_rank ==
+    fit_cov$design_columns
+)
+
+cat("Full covariate-adjusted design rank: PASS\n")
+```
+
+# Protected Location Component
+
+For ordinary RPBC the protected mean is
+
+\[
+\alpha_g+\beta_{Rg}R_r.
+\]
+
+For covariate-adjusted RPBC it becomes
+
+\[
+\alpha_g+\beta_{Rg}R_r+x_p^T\beta_{Xg}.
+\]
+
+The engine returns this fitted protected mean directly.
+
+```{r protected-mean}
+dim(
+  fit_cov$protected_mean
+)
+
+fit_cov$beta_covariate_hat[
+  ,
+  1:min(5, ncol(fit_cov$beta_covariate_hat)),
+  drop = FALSE
+]
+```
+
+The protected mean has the same feature-by-cell dimensions as the original data.
+
+```{r protected-mean-pass}
+stopifnot(
+  identical(
+    dim(fit_cov$protected_mean),
+    dim(dat)
+  )
+)
+
+cat("Protected mean dimensions: PASS\n")
+```
+
+# Initial Residual Patient Effects
+
+The initial residual patient effects are estimated in the null-space basis and then mapped back to patient space.
+
+The required identifying condition is
+
+\[
+X_0^T\widehat{\gamma}_g=0.
+\]
+
+```{r initial-gamma-constraint}
+fit_cov$gamma_hat_constraint_error
+
+initial_gamma_check <- t(
+  fit_cov$augmented_design_patient
+) %*%
+  fit_cov$gamma_hat
+
+max(
+  abs(
+    initial_gamma_check
+  )
+)
+```
+
+```{r initial-gamma-pass}
+stopifnot(
+  fit_cov$gamma_hat_constraint_error < 1e-7
+)
+
+cat("Initial residual patient constraint: PASS\n")
+```
+
+# Initial Patient-by-Region Interaction Constraint
+
+The patient-by-region interaction retains the ordinary RPBC restriction
+
+\[
+\sum_p\widehat{\kappa}_{pg}=0.
+\]
+
+```{r initial-kappa-constraint}
+fit_cov$kappa_hat_constraint_error
+
+max(
+  abs(
+    colSums(
+      fit_cov$kappa_hat
+    )
+  )
+)
+```
+
+```{r initial-kappa-pass}
+stopifnot(
+  fit_cov$kappa_hat_constraint_error < 1e-7
+)
+
+cat("Initial patient-by-region constraint: PASS\n")
+```
+
+# Empirical-Bayes Identifying Constraint Matrix
+
+The posterior vector contains both patient and patient-by-region effects.
+
+For covariate-adjusted RPBC the constraint matrix contains:
+
+- one row for every column of \(X_0\), enforcing \(X_0^T\gamma_g=0\);
+- one additional row enforcing \(\sum_p\kappa_{pg}=0\).
+
+The constraint matrix itself must have full row rank.
+
+```{r constraint-rank}
+fit_cov$constraint_rank
+
+fit_cov$constraint_rows
+
+stopifnot(
+  fit_cov$constraint_rank ==
+    fit_cov$constraint_rows
+)
+
+cat("Identifying constraint matrix rank: PASS\n")
+```
+
+# Posterior Residual Patient Constraint
+
+After the empirical-Bayes iterations, the posterior residual patient effects must continue to satisfy
+
+\[
+X_0^T\gamma_g^*=0.
+\]
+
+```{r posterior-gamma-constraint}
+fit_cov$gamma_star_constraint_error
+
+posterior_gamma_check <- t(
+  fit_cov$augmented_design_patient
+) %*%
+  fit_cov$gamma_star
+
+max(
+  abs(
+    posterior_gamma_check
+  )
+)
+```
+
+```{r posterior-gamma-pass}
+stopifnot(
+  fit_cov$gamma_star_constraint_error < 1e-7
+)
+
+cat("Posterior residual patient constraint: PASS\n")
+```
+
+# Posterior Patient-by-Region Constraint
+
+The posterior interaction effects must satisfy
+
+\[
+\sum_p\kappa_{pg}^*=0.
+\]
+
+```{r posterior-kappa-constraint}
+fit_cov$kappa_star_constraint_error
+
+max(
+  abs(
+    colSums(
+      fit_cov$kappa_star
+    )
+  )
+)
+```
+
+```{r posterior-kappa-pass}
+stopifnot(
+  fit_cov$kappa_star_constraint_error < 1e-7
+)
+
+cat("Posterior patient-by-region constraint: PASS\n")
+```
+
+# Scale Estimation: Why This Is Not Adaptive RPBC
+
+Covariate adjustment changes the **location decomposition and identifying restriction**.
+
+It does not, by itself, change the ordinary RPBC patient-region scale update.
+
+Therefore this engine uses the ordinary empirical-Bayes update for
+
+\[
+\delta_{pr,g}^2
+\]
+
+without the group-size-dependent stabilization used by Adaptive RPBC.
+
+This distinction is intentional:
+
+- ordinary RPBC: ordinary location structure and ordinary scale update;
+- covariate-adjusted RPBC: covariate-adjusted location structure and ordinary scale update;
+- Adaptive RPBC: Adaptive scale stabilization handled by the separate Adaptive engine.
+
+This keeps the two extensions conceptually distinct.
+
+# Harmonization
+
+On the standardized scale, the nuisance location for patient \(p\), region \(r\), and feature \(g\) is
+
+\[
+\gamma_{pg}^*
++
+\kappa_{pg}^*R_r.
+\]
+
+The engine removes this nuisance component and divides by the square root of the posterior patient-region variance multiplier.
+
+The result is then returned to the original feature scale and the complete protected mean is restored:
+
+\[
+\alpha_g
++
+\beta_{Rg}R_r
++
+x_p^T\beta_{Xg}.
+\]
+
+This is the defining preservation step of covariate-adjusted RPBC.
+
+# Output Integrity
+
+```{r output-integrity}
+dim(
+  fit_cov$data
+)
+
+dim(
+  dat
+)
+
+all(
+  is.finite(
+    fit_cov$data
+  )
+)
+
+identical(
+  dimnames(fit_cov$data),
+  dimnames(dat)
+)
+```
+
+```{r output-integrity-pass}
+stopifnot(
+  identical(
+    dim(fit_cov$data),
+    dim(dat)
+  ),
+
+  identical(
+    dimnames(fit_cov$data),
+    dimnames(dat)
+  ),
+
+  all(
+    is.finite(
+      fit_cov$data
+    )
+  )
+)
+
+cat("Harmonized output integrity: PASS\n")
+```
+
+# Complete Automatic Validation
+
+The core checks can be collected into a single automatic validation block.
+
+```{r complete-validation}
+stopifnot(
+  isTRUE(
+    fit_cov$covariate_adjusted
+  ),
+
+  fit_cov$q_covariates == 2L,
+
+  fit_cov$residual_patient_df == 3L,
+
+  max(
+    abs(
+      colMeans(
+        fit_cov$covariate_design_patient
+      )
+    )
+  ) < 1e-10,
+
+  fit_cov$nullspace_error < 1e-8,
+
+  fit_cov$gamma_hat_constraint_error < 1e-7,
+
+  fit_cov$kappa_hat_constraint_error < 1e-7,
+
+  fit_cov$gamma_star_constraint_error < 1e-7,
+
+  fit_cov$kappa_star_constraint_error < 1e-7,
+
+  fit_cov$design_rank ==
+    fit_cov$design_columns,
+
+  fit_cov$constraint_rank ==
+    fit_cov$constraint_rows,
+
+  all(
+    is.finite(
+      fit_cov$data
+    )
+  ),
+
+  identical(
+    dim(fit_cov$data),
+    dim(dat)
+  ),
+
+  identical(
+    dimnames(fit_cov$data),
+    dimnames(dat)
+  )
+)
+
+cat(
+  "\n*** COVARIATE-ADJUSTED RPBC VALIDATION PASSED ***\n"
+)
+```
+
+# Patient-Level Versus Cell-Level Covariate Input
+
+The package helper also permits covariates to be supplied once per cell, provided each variable is constant within patient.
+
+The following converts the patient-level covariates to cell-level form.
+
+```{r cell-level-covariates}
+covariates_cell <- covariates[
+  match(
+    as.character(patient),
+    rownames(covariates)
+  ),
+  ,
+  drop = FALSE
+]
+
+rownames(covariates_cell) <- NULL
+
+head(
+  covariates_cell
+)
+```
+
+Fit the same model using cell-level covariate input.
+
+```{r cell-level-fit}
+fit_cov_cell <- .rpbc_fit_matrix(
+  dat = dat,
+  patient = patient,
+  region = region,
+  covariates = covariates_cell,
+  core_level = "Core",
+  edge_level = "Edge"
+)
+```
+
+The resulting patient-level coded design should agree with the design obtained from the one-row-per-patient input.
+
+```{r patient-cell-equivalence}
+all.equal(
+  fit_cov$covariate_design_patient,
+  fit_cov_cell$covariate_design_patient,
+  tolerance = 1e-12
+)
+
+all.equal(
+  fit_cov$data,
+  fit_cov_cell$data,
+  tolerance = 1e-10
+)
+```
+
+```{r patient-cell-equivalence-pass}
+stopifnot(
+  isTRUE(
+    all.equal(
+      fit_cov$covariate_design_patient,
+      fit_cov_cell$covariate_design_patient,
+      tolerance = 1e-12
+    )
+  ),
+
+  isTRUE(
+    all.equal(
+      fit_cov$data,
+      fit_cov_cell$data,
+      tolerance = 1e-10
+    )
+  )
+)
+
+cat("Patient-level and valid cell-level covariate inputs agree: PASS\n")
+```
+
+# Relationship to Ordinary RPBC
+
+When no covariates are supplied,
+
+```r
+covariates = NULL
+```
+
+the same engine returns the ordinary RPBC configuration.
+
+```{r ordinary-mode-check}
+fit_ordinary <- .rpbc_fit_matrix(
+  dat = dat,
+  patient = patient,
+  region = region,
+  covariates = NULL,
+  core_level = "Core",
+  edge_level = "Edge"
+)
+
+fit_ordinary$covariate_adjusted
+
+dim(
+  fit_ordinary$covariate_design_patient
+)
+
+dim(
+  fit_ordinary$augmented_design_patient
+)
+
+fit_ordinary$q_covariates
+
+fit_ordinary$residual_patient_df
+```
+
+The expected structure is:
+
+- `covariate_adjusted = FALSE`;
+- \(X\) has \(P\) rows and zero columns;
+- \(X_0\) contains only the intercept;
+- \(q=0\);
+- residual patient degrees of freedom equal \(P-1\).
+
+This is how one internal engine supports both ordinary and covariate-adjusted RPBC without duplicating the statistical algorithm.
+
+# Why the Unified Engine Is Useful
+
+The unified implementation reflects the statistical nesting of the models.
+
+Ordinary RPBC is recovered by setting
+
+\[
+X=\varnothing.
+\]
+
+Then
+
+\[
+X_0=\mathbf 1
+\]
+
+and
+
+\[
+X_0^T\gamma_g=0
+\]
+
+reduces to
+
+\[
+\sum_p\gamma_{pg}=0.
+\]
+
+Thus the ordinary identifying restriction is a special case of the covariate-adjusted restriction.
+
+This provides a clean conceptual interpretation:
+
+\[
+\boxed{
+\text{ordinary RPBC}
+\subset
+\text{covariate-capable RPBC engine}
+}
+\]
+
+while Adaptive RPBC remains separate because its scale update is genuinely different.
+
+# Interpretation of the Validation
+
+The controlled example establishes the following implementation properties:
+
+1. **Covariate recognition**  
+   The engine correctly recognizes supplied patient-level covariates and switches to the covariate-adjusted branch.
+
+2. **Patient-balanced coding**  
+   Covariate columns are centered across patients rather than weighted by cell counts.
+
+3. **Null-space construction**  
+   The residual patient basis satisfies
+
+   \[
+   X_0^TQ_\perp\approx0.
+   \]
+
+4. **Initial identifiability**  
+   The initial residual patient effects satisfy
+
+   \[
+   X_0^T\widehat{\gamma}_g\approx0.
+   \]
+
+5. **Posterior identifiability**  
+   The constrained empirical-Bayes estimates satisfy
+
+   \[
+   X_0^T\gamma_g^*\approx0.
+   \]
+
+6. **Interaction identifiability**  
+   Both initial and posterior patient-by-region effects satisfy their sum-to-zero restriction.
+
+7. **Full-rank estimation**  
+   Both the location design and identifying constraint matrix have the required ranks.
+
+8. **Protected covariate component**  
+   The systematic patient-level covariate contribution is retained in the protected mean instead of being removed as nuisance variation.
+
+9. **Ordinary scale update retained**  
+   Covariate adjustment does not invoke the Adaptive variance-stabilization mechanism.
+
+10. **Output integrity**  
+    The harmonized matrix retains the input dimensions and names and contains finite values.
+
+# Final Validation Summary
+
+The covariate-adjusted RPBC engine is numerically consistent with the intended model structure:
+
+\[
+Y_{prjg}
+=
+\alpha_g
++
+\beta_{Rg}R_r
++
+x_p^T\beta_{Xg}
++
+\gamma_{pg}
++
+\kappa_{pg}R_r
++
+\delta_{pr,g}\epsilon_{prjg},
+\]
+
+with protected location component
+
+\[
+\alpha_g
++
+\beta_{Rg}R_r
++
+x_p^T\beta_{Xg},
+\]
+
+and identifying restrictions
+
+\[
+X_0^T\gamma_g=0
+\]
+
+and
+
+\[
+\sum_p\kappa_{pg}=0.
+\]
+
+The validation therefore supports the implementation of covariate-adjusted RPBC as a unified extension of ordinary RPBC in which prespecified patient-level systematic variation is preserved while residual patient and patient-by-region nuisance effects are harmonized.
+
+**Overall validation result: PASS**

@@ -1,0 +1,414 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>RPBC Ordinary Engine Validation Tutorial</title>
+<style>
+:root {
+  --bg:#f7f8fb; --card:#ffffff; --ink:#172033; --muted:#5e6a7f;
+  --accent:#4056a1; --accent2:#eef1ff; --line:#dfe4ef;
+  --ok:#155e3c; --okbg:#eaf7ef; --warn:#7a4b00; --warnbg:#fff6dd;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:Arial,Helvetica,sans-serif;line-height:1.55}
+.wrap{max-width:1050px;margin:0 auto;padding:36px 24px 70px}
+.hero{background:linear-gradient(135deg,#25345f,#4056a1);color:white;border-radius:18px;padding:34px 36px;margin-bottom:26px}
+.hero h1{margin:0 0 8px;font-size:32px;line-height:1.15}
+.hero p{margin:6px 0;color:#eef2ff}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:24px 26px;margin:18px 0;box-shadow:0 3px 12px rgba(20,30,60,.05)}
+h2{margin-top:0;color:#26386f;font-size:24px}
+h3{color:#33477f;margin-top:26px}
+h4{margin-bottom:6px}
+.kicker{font-size:13px;text-transform:uppercase;letter-spacing:.08em;font-weight:bold;color:#dce5ff}
+.callout{border-left:5px solid var(--accent);background:var(--accent2);padding:14px 16px;margin:16px 0;border-radius:7px}
+.pass{border-left-color:var(--ok);background:var(--okbg)}
+.note{border-left-color:#b57900;background:var(--warnbg)}
+pre{background:#111827;color:#e5e7eb;padding:16px 18px;border-radius:10px;overflow:auto;font-size:13px;line-height:1.45}
+code{font-family:Consolas,"Courier New",monospace}
+table{border-collapse:collapse;width:100%;margin:12px 0 18px;font-size:14px}
+th,td{border:1px solid var(--line);padding:9px 10px;text-align:right}
+th:first-child,td:first-child{text-align:left}
+th{background:#f0f3f9}
+.small{font-size:13px;color:var(--muted)}
+.eq{font-family:Georgia,serif;font-size:18px;text-align:center;padding:8px}
+.toc a{color:var(--accent);text-decoration:none}
+.toc li{margin:5px 0}
+.footer{font-size:12px;color:var(--muted);margin-top:30px}
+@media print{body{background:white} .card,.hero{box-shadow:none} pre{white-space:pre-wrap}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<section class="hero">
+<div class="kicker">Ordinary RPBC · numerical validation tutorial</div>
+<h1>Does the implementation do what the method claims?</h1>
+<p><strong>Author:</strong> Elizabeth B. Amona, PhD</p>
+<p><strong>Date:</strong> October 7, 2026</p>
+<p>This report records the controlled toy examples, R code, observed numerical outputs, and interpretations used while validating the ordinary RPBC statistical engine.</p>
+</section>
+
+<section class="card">
+<h2>How to read this report</h2>
+<p>Each validation check is organized around four items: <strong>question</strong>, <strong>code</strong>, <strong>observed output</strong>, and <strong>interpretation</strong>. The purpose is not merely to show that the code runs, but to show that the implementation behaves in a way that is consistent with the intended RPBC statistical targets.</p>
+<div class="callout note"><strong>Important:</strong> These toy examples provide controlled numerical evidence for the implementation. They complement, but do not replace, the mathematical results and broader simulation/real-data evaluation in the manuscript.</div>
+<ul class="toc">
+<li><a href="#toy1">Toy example 1: patient-wide nuisance location shifts</a></li>
+<li><a href="#ident">Identifiability constraints</a></li>
+<li><a href="#beta1">Preservation of the Core–Edge population-average effect</a></li>
+<li><a href="#gamma">Reduction of patient-wide nuisance location variation</a></li>
+<li><a href="#toy2">Toy example 2: patient-region scale heterogeneity</a></li>
+<li><a href="#scale">Harmonization of patient-region scale heterogeneity</a></li>
+<li><a href="#beta2">Preservation of β<sub>Rg</sub> under scale harmonization</a></li>
+<li><a href="#summary">Summary of what passed</a></li>
+</ul>
+</section>
+
+<section class="card" id="toy1">
+<h2>Toy example 1 — patient-wide nuisance location shifts</h2>
+<p><strong>Scientific question.</strong> Can ordinary RPBC reduce artificial patient-wide nuisance shifts while preserving the population-average Core–Edge signal?</p>
+<p>The simulated data contain 6 generic molecular features measured across 40 cells from 4 patients. Each patient contributes Core and Edge cells. A population-average regional signal is introduced by adding +0.8 to Edge and −0.8 to Core, so the intended Edge − Core separation is about 1.6 before sampling noise. Patient-wide nuisance shifts are then deliberately added.</p>
+
+<h3>Data-generation and model-fitting code</h3>
+<pre><code>set.seed(2026)
+
+patient &lt;- rep(paste0(&quot;P&quot;, 1:4), each = 10)
+
+region &lt;- rep(
+  rep(c(&quot;Core&quot;, &quot;Edge&quot;), each = 5),
+  times = 4
+)
+
+dat_test &lt;- matrix(
+  rnorm(6 * 40, mean = 0, sd = 0.5),
+  nrow = 6,
+  ncol = 40
+)
+
+rownames(dat_test) &lt;- paste0(&quot;Feature&quot;, 1:6)
+colnames(dat_test) &lt;- paste0(&quot;Cell&quot;, 1:40)
+
+dat_test &lt;- sweep(
+  dat_test,
+  MARGIN = 1,
+  STATS = seq(1, 6),
+  FUN = &quot;+&quot;
+)
+
+# Population-average regional signal:
+# Edge = +0.8, Core = -0.8
+dat_test &lt;- sweep(
+  dat_test,
+  MARGIN = 2,
+  STATS = ifelse(region == &quot;Edge&quot;, 0.8, -0.8),
+  FUN = &quot;+&quot;
+)
+
+# Patient-wide nuisance location shifts
+patient_shift &lt;- c(
+  P1 = -0.7,
+  P2 = 0.4,
+  P3 = 1.0,
+  P4 = -0.7
+)
+
+dat_test &lt;- sweep(
+  dat_test,
+  MARGIN = 2,
+  STATS = patient_shift[patient],
+  FUN = &quot;+&quot;
+)
+
+fit_test &lt;- .rpbc_fit_matrix(
+  dat = dat_test,
+  patient = patient,
+  region = region
+)</code></pre>
+
+<h3>Basic computational checks</h3>
+<p><strong>Observed output.</strong></p>
+<pre><code>dim(fit_test$data)
+# [1]  6 40
+
+all(is.finite(fit_test$data))
+# [1] TRUE
+
+fit_test$converged
+# [1] TRUE TRUE TRUE TRUE TRUE TRUE
+
+fit_test$iterations
+# [1] 5 4 5 5 6 5</code></pre>
+
+<div class="callout pass"><strong>Interpretation:</strong> The engine returned a 6 × 40 harmonized matrix, produced no non-finite values, and all six features converged within 4–6 empirical-Bayes iterations.</div>
+</section>
+
+<section class="card" id="ident">
+<h2>Identifiability check</h2>
+<p><strong>Question.</strong> Do the posterior patient effects and patient×region interaction effects satisfy the RPBC sum-to-zero constraints?</p>
+<div class="eq">Σ<sub>p</sub> γ<sub>pg</sub> = 0 &nbsp;&nbsp;&nbsp; and &nbsp;&nbsp;&nbsp; Σ<sub>p</sub> κ<sub>pg</sub> = 0</div>
+
+<h3>Code</h3>
+<pre><code>colSums(fit_test$gamma_star)
+colSums(fit_test$kappa_star)</code></pre>
+
+<h3>Observed output</h3>
+<p>The column sums were numerically zero up to floating-point precision: approximately order 10<sup>−16</sup> for γ and 10<sup>−17</sup> for κ.</p>
+
+<div class="callout pass"><strong>Interpretation:</strong> The constrained empirical-Bayes update is enforcing the intended identifiability conditions computationally. Tiny values on the order of 10<sup>−16</sup> are ordinary machine-precision rounding error, not meaningful violations.</div>
+</section>
+
+<section class="card" id="beta1">
+<h2>Preservation of the patient-balanced Core–Edge contrast</h2>
+<p><strong>Question.</strong> After harmonization, is the patient-balanced population-average regional contrast retained?</p>
+
+<h3>Code</h3>
+<pre><code>patient_balanced_contrast &lt;- function(x, patient, region) {
+
+  per_patient &lt;- sapply(
+    unique(patient),
+    function(p) {
+      rowMeans(
+        x[, patient == p &amp; region == &quot;Edge&quot;, drop = FALSE]
+      ) -
+      rowMeans(
+        x[, patient == p &amp; region == &quot;Core&quot;, drop = FALSE]
+      )
+    }
+  )
+
+  rowMeans(per_patient)
+}
+
+contrast_before &lt;- patient_balanced_contrast(
+  dat_test, patient, region
+)
+
+contrast_after &lt;- patient_balanced_contrast(
+  fit_test$data, patient, region
+)
+
+cbind(
+  before = contrast_before,
+  after  = contrast_after
+)</code></pre>
+
+<h3>Observed output</h3>
+<table><thead><tr><th>Feature</th><th>Before RPBC</th><th>After RPBC</th><th>|Change|</th></tr></thead><tbody><tr><td>Feature1</td><td>1.287615</td><td>1.289522</td><td>0.001907</td></tr><tr><td>Feature2</td><td>1.438745</td><td>1.434405</td><td>0.004340</td></tr><tr><td>Feature3</td><td>1.416703</td><td>1.419261</td><td>0.002558</td></tr><tr><td>Feature4</td><td>1.625522</td><td>1.611124</td><td>0.014398</td></tr><tr><td>Feature5</td><td>1.745108</td><td>1.759363</td><td>0.014255</td></tr><tr><td>Feature6</td><td>1.589785</td><td>1.577605</td><td>0.012180</td></tr></tbody></table>
+
+<div class="callout pass"><strong>Interpretation:</strong> The observed patient-balanced regional contrasts remain very close before and after RPBC. The empirical sample contrast need not be exactly identical because finite-sample residuals and scale harmonization can slightly alter observed group means; the protected fitted population-average regional component is restored during reconstruction.</div>
+</section>
+
+<section class="card" id="gamma">
+<h2>Reduction of patient-wide nuisance location variation</h2>
+<p><strong>Question.</strong> Does RPBC reduce the artificial patient-to-patient nuisance shifts represented by γ<sub>pg</sub>?</p>
+
+<h3>Code</h3>
+<pre><code>patient_feature_means &lt;- function(x, patient) {
+
+  sapply(
+    unique(patient),
+    function(p) {
+      rowMeans(
+        x[, patient == p, drop = FALSE]
+      )
+    }
+  )
+}
+
+patient_means_before &lt;- patient_feature_means(dat_test, patient)
+patient_means_after  &lt;- patient_feature_means(fit_test$data, patient)
+
+cbind(
+  SD_before = apply(patient_means_before, 1, sd),
+  SD_after  = apply(patient_means_after, 1, sd)
+)</code></pre>
+
+<h3>Observed output</h3>
+<p class="small">Values below are rounded from the interactive R console.</p>
+<table><thead><tr><th>Feature</th><th>SD across patient means: before</th><th>SD across patient means: after</th></tr></thead><tbody><tr><td>Feature1</td><td>0.87</td><td>0.07</td></tr><tr><td>Feature2</td><td>0.80</td><td>0.05</td></tr><tr><td>Feature3</td><td>0.92</td><td>0.06</td></tr><tr><td>Feature4</td><td>0.84</td><td>0.04</td></tr><tr><td>Feature5</td><td>0.94</td><td>0.03</td></tr><tr><td>Feature6</td><td>0.87</td><td>0.14</td></tr></tbody></table>
+
+<div class="callout pass"><strong>Interpretation:</strong> Patient-to-patient variation in feature means is dramatically reduced after harmonization. This is the behavior expected when RPBC removes patient-wide nuisance location effects while retaining the protected regional component.</div>
+</section>
+
+<section class="card" id="toy2">
+<h2>Toy example 2 — patient-region scale heterogeneity</h2>
+<p><strong>Scientific question.</strong> Does the δ<sub>pr,g</sub><sup>2</sup> part of ordinary RPBC harmonize deliberately unequal patient-region variances without destroying the protected regional mean effect?</p>
+<p>This dataset contains 6 features and 80 cells. In addition to patient-wide location shifts and the same Core–Edge signal, each patient-region group is assigned a deliberately different standard deviation, ranging from 0.30 to 1.50.</p>
+
+<h3>Data-generation and model-fitting code</h3>
+<pre><code>set.seed(2027)
+
+patient2 &lt;- rep(
+  paste0(&quot;P&quot;, 1:4),
+  each = 20
+)
+
+region2 &lt;- rep(
+  rep(c(&quot;Core&quot;, &quot;Edge&quot;), each = 10),
+  times = 4
+)
+
+group_sd &lt;- c(
+  &quot;P1_Core&quot; = 0.30,
+  &quot;P1_Edge&quot; = 1.20,
+  &quot;P2_Core&quot; = 0.60,
+  &quot;P2_Edge&quot; = 1.50,
+  &quot;P3_Core&quot; = 1.30,
+  &quot;P3_Edge&quot; = 0.40,
+  &quot;P4_Core&quot; = 0.80,
+  &quot;P4_Edge&quot; = 1.10
+)
+
+patient_shift2 &lt;- c(
+  P1 = -0.8,
+  P2 = 0.3,
+  P3 = 1.0,
+  P4 = -0.5
+)
+
+dat_scale_test &lt;- matrix(
+  0,
+  nrow = 6,
+  ncol = length(patient2)
+)
+
+rownames(dat_scale_test) &lt;- paste0(&quot;Feature&quot;, 1:6)
+colnames(dat_scale_test) &lt;- paste0(&quot;Cell&quot;, seq_len(ncol(dat_scale_test)))
+
+for (j in seq_len(ncol(dat_scale_test))) {
+
+  p &lt;- patient2[j]
+  r &lt;- region2[j]
+
+  sd_j &lt;- group_sd[paste0(p, &quot;_&quot;, r)]
+
+  biological_region_effect &lt;- ifelse(
+    r == &quot;Edge&quot;,
+    0.8,
+    -0.8
+  )
+
+  dat_scale_test[, j] &lt;- seq(1, 6) +
+    biological_region_effect +
+    patient_shift2[p] +
+    rnorm(6, mean = 0, sd = sd_j)
+}
+
+fit_scale_test &lt;- .rpbc_fit_matrix(
+  dat = dat_scale_test,
+  patient = patient2,
+  region = region2
+)</code></pre>
+
+<h3>Convergence</h3>
+<pre><code>fit_scale_test$converged
+# [1] TRUE TRUE TRUE TRUE TRUE TRUE
+
+fit_scale_test$iterations
+# [1] 4 5 5 4 5 5</code></pre>
+
+<div class="callout pass"><strong>Interpretation:</strong> All six features converged successfully despite strong group-specific scale heterogeneity.</div>
+</section>
+
+<section class="card" id="scale">
+<h2>Direct check of patient-region scale harmonization</h2>
+<p><strong>Question.</strong> Are the deliberately heterogeneous patient-region standard deviations made more comparable after RPBC?</p>
+
+<h3>Code</h3>
+<pre><code>patient_region2 &lt;- interaction(
+  patient2,
+  region2,
+  sep = &quot;_&quot;,
+  drop = TRUE
+)
+
+group_variance &lt;- function(x, group) {
+
+  sapply(
+    levels(group),
+    function(gr) {
+      matrixStats::rowVars(
+        x[, group == gr, drop = FALSE]
+      )
+    }
+  )
+}
+
+variance_before &lt;- group_variance(
+  dat_scale_test,
+  patient_region2
+)
+
+variance_after &lt;- group_variance(
+  fit_scale_test$data,
+  patient_region2
+)
+
+cbind(
+  SD_before = sqrt(colMeans(variance_before)),
+  SD_after  = sqrt(colMeans(variance_after))
+)</code></pre>
+
+<h3>Observed output</h3>
+<table><thead><tr><th>Patient-region group</th><th>SD before RPBC</th><th>SD after RPBC</th></tr></thead><tbody><tr><td>P1_Core</td><td>0.2973</td><td>0.8487</td></tr><tr><td>P2_Core</td><td>0.5134</td><td>0.9007</td></tr><tr><td>P3_Core</td><td>1.2397</td><td>0.8511</td></tr><tr><td>P4_Core</td><td>0.7036</td><td>0.8682</td></tr><tr><td>P1_Edge</td><td>1.2511</td><td>0.8793</td></tr><tr><td>P2_Edge</td><td>1.3860</td><td>0.8818</td></tr><tr><td>P3_Edge</td><td>0.4316</td><td>0.8696</td></tr><tr><td>P4_Edge</td><td>0.9024</td><td>0.8679</td></tr></tbody></table>
+
+<div class="callout pass"><strong>Interpretation:</strong> Before harmonization, group SDs span roughly 0.30–1.39. After RPBC, they cluster tightly around approximately 0.85–0.90. This is direct numerical evidence that the patient-region scale component δ<sub>pr,g</sub><sup>2</sup> is performing the intended scale harmonization.</div>
+</section>
+
+<section class="card" id="beta2">
+<h2>Does β<sub>Rg</sub> remain preserved while scale heterogeneity is corrected?</h2>
+<p><strong>Question.</strong> After the strong scale correction above, does the patient-balanced Core–Edge population-average effect remain close to its pre-harmonization value?</p>
+
+<h3>Code</h3>
+<pre><code>contrast_scale_before &lt;- patient_balanced_contrast(
+  dat_scale_test,
+  patient2,
+  region2
+)
+
+contrast_scale_after &lt;- patient_balanced_contrast(
+  fit_scale_test$data,
+  patient2,
+  region2
+)
+
+cbind(
+  before = contrast_scale_before,
+  after  = contrast_scale_after
+)</code></pre>
+
+<h3>Observed output</h3>
+<table><thead><tr><th>Feature</th><th>Before RPBC</th><th>After RPBC</th><th>|Change|</th></tr></thead><tbody><tr><td>Feature1</td><td>1.4842</td><td>1.4849</td><td>0.0007</td></tr><tr><td>Feature2</td><td>1.4532</td><td>1.4988</td><td>0.0456</td></tr><tr><td>Feature3</td><td>1.2744</td><td>1.3093</td><td>0.0349</td></tr><tr><td>Feature4</td><td>1.3318</td><td>1.2743</td><td>0.0575</td></tr><tr><td>Feature5</td><td>1.4456</td><td>1.4004</td><td>0.0452</td></tr><tr><td>Feature6</td><td>1.3128</td><td>1.3464</td><td>0.0336</td></tr></tbody></table>
+
+<div class="callout pass"><strong>Interpretation:</strong> The largest absolute change in the observed patient-balanced regional contrast is only about 0.06, even though the patient-region SDs were strongly harmonized. In this controlled example, ordinary RPBC therefore achieves the intended combination: strong nuisance-scale correction with close preservation of β<sub>Rg</sub>.</div>
+</section>
+
+<section class="card" id="summary">
+<h2>Summary of validation results</h2>
+<table>
+<thead><tr><th>Validation target</th><th>What was checked</th><th>Result</th></tr></thead>
+<tbody>
+<tr><td>Execution</td><td>Engine runs and returns finite harmonized data</td><td><strong>PASS</strong></td></tr>
+<tr><td>Convergence</td><td>All features converge in both toy examples</td><td><strong>PASS</strong></td></tr>
+<tr><td>Identifiability</td><td>Σγ = 0 and Σκ = 0 up to machine precision</td><td><strong>PASS</strong></td></tr>
+<tr><td>Patient nuisance location</td><td>Across-patient mean variability decreases strongly</td><td><strong>PASS</strong></td></tr>
+<tr><td>Patient-region scale</td><td>Widely different group SDs become much more comparable</td><td><strong>PASS</strong></td></tr>
+<tr><td>Regional biology</td><td>Patient-balanced Core–Edge contrast remains close before/after</td><td><strong>PASS</strong></td></tr>
+</tbody>
+</table>
+
+<div class="callout"><strong>Bottom line:</strong> In these controlled numerical experiments, the ordinary RPBC engine behaves consistently with its intended design: it harmonizes patient-level location and patient-region scale nuisance variation while closely preserving the population-average regional effect β<sub>Rg</sub>.</div>
+</section>
+
+<section class="card">
+<h2>Where this fits in package development</h2>
+<p>This HTML report is a <strong>human-readable validation tutorial</strong>. It is distinct from the permanent automated tests that will live under <code>tests/testthat/</code>. The automated tests will protect the package against future regressions; this report explains the statistical meaning of those checks for collaborators, supervisors, reviewers, and future users.</p>
+<p>A later vignette can reuse a cleaner subset of this material, but the vignette should focus on teaching users how to use RPBC rather than documenting every internal development check.</p>
+</section>
+
+<div class="footer">Prepared from the interactive RPBC package-development session. Code blocks are presented for reproducibility; the numerical outputs shown here are the observed results from the validation session.</div>
+
+</div>
+</body>
+</html>

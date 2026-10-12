@@ -1,0 +1,1075 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="" xml:lang="">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <meta name="author" content="Elizabeth B. Amona, PhD" />
+  <meta name="dcterms.date" content="2026-10-07" />
+  <title>Covariate-Adjusted RPBC: Theory-to-Code Validation Tutorial</title>
+  <style>
+    code{white-space: pre-wrap;}
+    span.smallcaps{font-variant: small-caps;}
+    div.columns{display: flex; gap: min(4vw, 1.5em);}
+    div.column{flex: auto; overflow-x: auto;}
+    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+    /* The extra [class] is a hack that increases specificity enough to
+       override a similar rule in reveal.js */
+    ul.task-list[class]{list-style: none;}
+    ul.task-list li input[type="checkbox"] {
+      font-size: inherit;
+      width: 0.8em;
+      margin: 0 0.8em 0.2em -1.6em;
+      vertical-align: middle;
+    }
+    /* CSS for syntax highlighting */
+    pre > code.sourceCode { white-space: pre; position: relative; }
+    pre > code.sourceCode > span { line-height: 1.25; }
+    pre > code.sourceCode > span:empty { height: 1.2em; }
+    .sourceCode { overflow: visible; }
+    code.sourceCode > span { color: inherit; text-decoration: inherit; }
+    div.sourceCode { margin: 1em 0; }
+    pre.sourceCode { margin: 0; }
+    @media screen {
+    div.sourceCode { overflow: auto; }
+    }
+    @media print {
+    pre > code.sourceCode { white-space: pre-wrap; }
+    pre > code.sourceCode > span { display: inline-block; text-indent: -5em; padding-left: 5em; }
+    }
+    pre.numberSource code
+      { counter-reset: source-line 0; }
+    pre.numberSource code > span
+      { position: relative; left: -4em; counter-increment: source-line; }
+    pre.numberSource code > span > a:first-child::before
+      { content: counter(source-line);
+        position: relative; left: -1em; text-align: right; vertical-align: baseline;
+        border: none; display: inline-block;
+        -webkit-touch-callout: none; -webkit-user-select: none;
+        -khtml-user-select: none; -moz-user-select: none;
+        -ms-user-select: none; user-select: none;
+        padding: 0 4px; width: 4em;
+        color: #aaaaaa;
+      }
+    pre.numberSource { margin-left: 3em; border-left: 1px solid #aaaaaa;  padding-left: 4px; }
+    div.sourceCode
+      {   }
+    @media screen {
+    pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+    }
+    code span.al { color: #ff0000; font-weight: bold; } /* Alert */
+    code span.an { color: #60a0b0; font-weight: bold; font-style: italic; } /* Annotation */
+    code span.at { color: #7d9029; } /* Attribute */
+    code span.bn { color: #40a070; } /* BaseN */
+    code span.bu { color: #008000; } /* BuiltIn */
+    code span.cf { color: #007020; font-weight: bold; } /* ControlFlow */
+    code span.ch { color: #4070a0; } /* Char */
+    code span.cn { color: #880000; } /* Constant */
+    code span.co { color: #60a0b0; font-style: italic; } /* Comment */
+    code span.cv { color: #60a0b0; font-weight: bold; font-style: italic; } /* CommentVar */
+    code span.do { color: #ba2121; font-style: italic; } /* Documentation */
+    code span.dt { color: #902000; } /* DataType */
+    code span.dv { color: #40a070; } /* DecVal */
+    code span.er { color: #ff0000; font-weight: bold; } /* Error */
+    code span.ex { } /* Extension */
+    code span.fl { color: #40a070; } /* Float */
+    code span.fu { color: #06287e; } /* Function */
+    code span.im { color: #008000; font-weight: bold; } /* Import */
+    code span.in { color: #60a0b0; font-weight: bold; font-style: italic; } /* Information */
+    code span.kw { color: #007020; font-weight: bold; } /* Keyword */
+    code span.op { color: #666666; } /* Operator */
+    code span.ot { color: #007020; } /* Other */
+    code span.pp { color: #bc7a00; } /* Preprocessor */
+    code span.sc { color: #4070a0; } /* SpecialChar */
+    code span.ss { color: #bb6688; } /* SpecialString */
+    code span.st { color: #4070a0; } /* String */
+    code span.va { color: #19177c; } /* Variable */
+    code span.vs { color: #4070a0; } /* VerbatimString */
+    code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warning */
+  </style>
+  <link rel="stylesheet" href="/mnt/data/rpbc_tutorial.css" />
+  <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
+  <script src="/usr/share/javascript/mathjax/MathJax.js"
+  type="text/javascript"></script>
+</head>
+<body>
+<header id="title-block-header">
+<h1 class="title">Covariate-Adjusted RPBC: Theory-to-Code Validation
+Tutorial</h1>
+<p class="author">Elizabeth B. Amona, PhD</p>
+<p class="date">October 7, 2026</p>
+</header>
+<nav id="TOC" role="doc-toc">
+<ul>
+<li><a href="#purpose" id="toc-purpose"><span
+class="toc-section-number">1</span> Purpose</a></li>
+<li><a href="#how-this-tutorial-connects-to-the-rpbc-manuscript"
+id="toc-how-this-tutorial-connects-to-the-rpbc-manuscript"><span
+class="toc-section-number">2</span> How This Tutorial Connects to the
+RPBC Manuscript</a></li>
+<li><a href="#statistical-model" id="toc-statistical-model"><span
+class="toc-section-number">3</span> Statistical Model</a></li>
+<li><a href="#what-covariate-adjustment-changes"
+id="toc-what-covariate-adjustment-changes"><span
+class="toc-section-number">4</span> What Covariate Adjustment
+Changes</a></li>
+<li><a href="#why-the-covariate-matrix-is-centered"
+id="toc-why-the-covariate-matrix-is-centered"><span
+class="toc-section-number">5</span> Why the Covariate Matrix Is
+Centered</a></li>
+<li><a
+href="#why-the-residual-patient-effect-must-be-orthogonal-to-the-covariates"
+id="toc-why-the-residual-patient-effect-must-be-orthogonal-to-the-covariates"><span
+class="toc-section-number">6</span> Why the Residual Patient Effect Must
+Be Orthogonal to the Covariates</a></li>
+<li><a href="#why-covariate-adjusted-rpbc-is-still-rpbc"
+id="toc-why-covariate-adjusted-rpbc-is-still-rpbc"><span
+class="toc-section-number">7</span> Why Covariate-Adjusted RPBC Is Still
+RPBC</a></li>
+<li><a href="#package-setup" id="toc-package-setup"><span
+class="toc-section-number">8</span> Package Setup</a></li>
+<li><a href="#patient-level-covariates"
+id="toc-patient-level-covariates"><span
+class="toc-section-number">9</span> Patient-Level Covariates</a></li>
+<li><a href="#fit-covariate-adjusted-rpbc"
+id="toc-fit-covariate-adjusted-rpbc"><span
+class="toc-section-number">10</span> Fit Covariate-Adjusted
+RPBC</a></li>
+<li><a href="#confirm-that-the-covariate-branch-was-used"
+id="toc-confirm-that-the-covariate-branch-was-used"><span
+class="toc-section-number">11</span> Confirm That the Covariate Branch
+Was Used</a></li>
+<li><a href="#verify-equal-patient-centering"
+id="toc-verify-equal-patient-centering"><span
+class="toc-section-number">12</span> Verify Equal-Patient
+Centering</a></li>
+<li><a href="#protected-location-component"
+id="toc-protected-location-component"><span
+class="toc-section-number">13</span> Protected Location
+Component</a></li>
+<li><a href="#initial-residual-patient-effects"
+id="toc-initial-residual-patient-effects"><span
+class="toc-section-number">14</span> Initial Residual Patient
+Effects</a></li>
+<li><a href="#initial-patient-by-region-interaction-constraint"
+id="toc-initial-patient-by-region-interaction-constraint"><span
+class="toc-section-number">15</span> Initial Patient-by-Region
+Interaction Constraint</a></li>
+<li><a href="#empirical-bayes-identifying-constraint-matrix"
+id="toc-empirical-bayes-identifying-constraint-matrix"><span
+class="toc-section-number">16</span> Empirical-Bayes Identifying
+Constraint Matrix</a></li>
+<li><a href="#patient-level-versus-cell-level-covariate-input"
+id="toc-patient-level-versus-cell-level-covariate-input"><span
+class="toc-section-number">17</span> Patient-Level Versus Cell-Level
+Covariate Input</a></li>
+<li><a href="#relationship-to-ordinary-rpbc"
+id="toc-relationship-to-ordinary-rpbc"><span
+class="toc-section-number">18</span> Relationship to Ordinary
+RPBC</a></li>
+<li><a href="#why-the-unified-engine-is-useful"
+id="toc-why-the-unified-engine-is-useful"><span
+class="toc-section-number">19</span> Why the Unified Engine Is
+Useful</a></li>
+<li><a href="#interpretation-of-the-validation"
+id="toc-interpretation-of-the-validation"><span
+class="toc-section-number">20</span> Interpretation of the
+Validation</a></li>
+<li><a href="#final-validation-summary"
+id="toc-final-validation-summary"><span
+class="toc-section-number">21</span> Final Validation Summary</a></li>
+</ul>
+</nav>
+<h1 data-number="1" id="purpose"><span
+class="header-section-number">1</span> Purpose</h1>
+<p>This tutorial documents the statistical motivation, implementation,
+and controlled numerical validation of the <strong>covariate-adjusted
+Region-Preserving Batch Correction (RPBC)</strong> engine.</p>
+<p>The goal is not merely to show that the code runs. The tutorial
+connects the covariate-adjusted implementation directly to the
+mathematical structure of RPBC and asks whether the software behaves
+consistently with the intended preservation target and identifying
+restrictions.</p>
+<p>The central questions are:</p>
+<ul>
+<li>How does covariate-adjusted RPBC extend ordinary RPBC?</li>
+<li>Why are patient-level covariates included in the protected location
+component?</li>
+<li>Why is the residual patient effect restricted to the orthogonal
+complement of the covariate space?</li>
+<li>Does the implementation construct the patient-level covariate design
+correctly?</li>
+<li>Does it enforce (X_0^T_g=0) numerically?</li>
+<li>Does it retain the usual sum-to-zero constraint for the
+patient-by-region interaction?</li>
+<li>Does the constrained empirical-Bayes update preserve those
+restrictions after estimation?</li>
+<li>Does the harmonized output preserve dimensions, names, and finite
+values?</li>
+<li>Does covariate-adjusted RPBC continue to use the ordinary RPBC scale
+update rather than the Adaptive stabilization rule?</li>
+</ul>
+<blockquote>
+<p><strong>Important:</strong> These controlled examples provide
+implementation-level numerical validation. They complement, but do not
+replace, the mathematical results, simulation studies, and real-data
+analyses in the RPBC manuscript.</p>
+</blockquote>
+<h1 data-number="2"
+id="how-this-tutorial-connects-to-the-rpbc-manuscript"><span
+class="header-section-number">2</span> How This Tutorial Connects to the
+RPBC Manuscript</h1>
+<p>Equation numbering follows the current RPBC manuscript used during
+package development.</p>
+<table>
+<colgroup>
+<col style="width: 33%" />
+<col style="width: 33%" />
+<col style="width: 33%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th style="text-align: left;">Manuscript component</th>
+<th style="text-align: left;">Role in the method</th>
+<th style="text-align: left;">Validation connection</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td style="text-align: left;">Equation (5)</td>
+<td style="text-align: left;">Core (=-1), Edge (=+1) coding</td>
+<td style="text-align: left;">Used throughout the simulated paired
+design</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">Equation (6)</td>
+<td style="text-align: left;">Basic RPBC location-scale model</td>
+<td style="text-align: left;">Provides the ordinary RPBC foundation</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">Equation (8)</td>
+<td style="text-align: left;">Ordinary sum-to-zero identifying
+constraints</td>
+<td style="text-align: left;">Retained for the patient-by-region
+interaction</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">Equation (9)</td>
+<td style="text-align: left;">Ordinary protected location component</td>
+<td style="text-align: left;">Extended by the covariate-adjusted
+formulation</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">Equations (11)-(14)</td>
+<td style="text-align: left;">Covariate-adjusted RPBC model and
+protected mean</td>
+<td style="text-align: left;">Define the systematic covariate component
+to preserve</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">Equation (19)</td>
+<td style="text-align: left;">Pooled feature variance</td>
+<td style="text-align: left;">Used in standardization</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">Equations (20)-(21)</td>
+<td style="text-align: left;">Empirical-Bayes hyperparameters</td>
+<td style="text-align: left;">Used for patient and interaction
+effects</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">Equations (23)-(25)</td>
+<td style="text-align: left;">Joint posterior and constrained posterior
+update</td>
+<td style="text-align: left;">Extended to the (X_0^T_g=0)
+restriction</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">Equation (26)</td>
+<td style="text-align: left;">Patient-region residual sum of
+squares</td>
+<td style="text-align: left;">Used in the scale update</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">Equation (27)</td>
+<td style="text-align: left;">Ordinary EB variance-multiplier
+update</td>
+<td style="text-align: left;">Used here without Adaptive
+stabilization</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">Equation (31)</td>
+<td style="text-align: left;">Covariate-adjusted constrained update</td>
+<td style="text-align: left;">Checked through the posterior identifying
+restrictions</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">Equation (32)</td>
+<td style="text-align: left;">Covariate-adjusted RPBC
+transformation</td>
+<td style="text-align: left;">Reflected in the final harmonized
+output</td>
+</tr>
+</tbody>
+</table>
+<h1 data-number="3" id="statistical-model"><span
+class="header-section-number">3</span> Statistical Model</h1>
+<p>For feature (g), patient (p), region (r), and cell (j), the
+covariate-adjusted RPBC location-scale model is</p>
+<p>[ Y_{prjg} = <em>g + </em>{Rg}R_r + x_p^T<em>{Xg} + </em>{pg} +
+<em>{pg}R_r + </em>{pr,g}_{prjg}. ]</p>
+<p>Here:</p>
+<ul>
+<li>(_g) is the feature-specific intercept;</li>
+<li>(R_r{-1,+1}) codes Core and Edge;</li>
+<li>(x_p) is the vector of patient-level covariates;</li>
+<li>(_{Xg}) contains the systematic covariate coefficients;</li>
+<li>(_{pg}) is the residual patient-specific nuisance effect;</li>
+<li>(_{pg}) is the patient-specific deviation from the
+population-average regional effect;</li>
+<li>(_{pr,g}^2) is the patient-region residual variance multiplier.</li>
+</ul>
+<p>The population-average regional effect remains represented by
+(_{Rg}).</p>
+<h1 data-number="4" id="what-covariate-adjustment-changes"><span
+class="header-section-number">4</span> What Covariate Adjustment
+Changes</h1>
+<p>Ordinary RPBC protects</p>
+<p>[ <em>g+</em>{Rg}R_r. ]</p>
+<p>Covariate-adjusted RPBC instead protects</p>
+<p>[ <em>g+</em>{Rg}R_r+x_p^T_{Xg}. ]</p>
+<p>This distinction is fundamental.</p>
+<p>A patient-level variable such as age or sex may explain systematic
+biological or clinical variation. If that systematic variation is
+included as a prespecified covariate, it should not be absorbed into the
+nuisance patient effect and removed during harmonization.</p>
+<p>Therefore the covariate-adjusted method separates:</p>
+<p>[ ]</p>
+<p>from</p>
+<p>[ . ]</p>
+<h1 data-number="5" id="why-the-covariate-matrix-is-centered"><span
+class="header-section-number">5</span> Why the Covariate Matrix Is
+Centered</h1>
+<p>Let (X) denote the patient-level covariate design after categorical
+variables have been expanded.</p>
+<p>RPBC centers every column of (X) equally across patients. The
+augmented patient-level design is then</p>
+<p>[ X_0=[,X]. ]</p>
+<p>Centering makes the covariate columns orthogonal to the intercept in
+the patient-balanced design and gives the intercept a clear
+population-average interpretation.</p>
+<p>This is a patient-level operation. A patient with many cells should
+not receive more weight in the centering step simply because more cells
+were observed.</p>
+<h1 data-number="6"
+id="why-the-residual-patient-effect-must-be-orthogonal-to-the-covariates"><span
+class="header-section-number">6</span> Why the Residual Patient Effect
+Must Be Orthogonal to the Covariates</h1>
+<p>If the residual patient effect were unrestricted, it could reproduce
+variation already represented by the intercept and covariates.</p>
+<p>That would make the decomposition between</p>
+<p>[ x_p^T_{Xg} ]</p>
+<p>and</p>
+<p>[ _{pg} ]</p>
+<p>non-identifiable.</p>
+<p>Covariate-adjusted RPBC therefore imposes</p>
+<p>[ X_0^T_g=0. ]</p>
+<p>The residual patient effect is parameterized in</p>
+<p>[ (X_0^T). ]</p>
+<p>This means that (_g) contains only patient-specific variation that
+cannot be represented by the protected intercept/covariate space.</p>
+<p>The patient-by-region interaction retains the ordinary RPBC
+restriction</p>
+<p>[ <em>p </em>{pg}=0. ]</p>
+<h1 data-number="7" id="why-covariate-adjusted-rpbc-is-still-rpbc"><span
+class="header-section-number">7</span> Why Covariate-Adjusted RPBC Is
+Still RPBC</h1>
+<p>Covariate-adjusted RPBC is not a separate public method. It is the
+same RPBC framework with an optional patient-level systematic
+component.</p>
+<p>Conceptually:</p>
+[ =
+<span class="math display">\[\begin{cases}
+\text{ordinary RPBC}, &amp; \text{if covariates are absent},\\
+\text{covariate-adjusted RPBC}, &amp; \text{if covariates are supplied}.
+\end{cases}\]</span>
+<p>]</p>
+<p>In the package engine this is implemented through</p>
+<div class="sourceCode" id="cb1"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a>covariates <span class="ot">=</span> <span class="cn">NULL</span></span></code></pre></div>
+<p>for ordinary RPBC and a supplied patient-level covariate object for
+the adjusted analysis.</p>
+<h1 data-number="8" id="package-setup"><span
+class="header-section-number">8</span> Package Setup</h1>
+<p>```{r setup, message=FALSE, warning=FALSE}
+devtools::load_all(“..”)</p>
+<p>knitr::opts_chunk$set( echo = TRUE, message = FALSE, warning = FALSE
+)</p>
+<pre><code>
+# Controlled Validation Example
+
+## Design
+
+The validation example uses:
+
+- 6 patients;
+- paired Core and Edge regions;
+- 4 cells per patient-region group;
+- 20 features;
+- a continuous patient-level covariate: age;
+- a categorical patient-level covariate: sex;
+- a population-average regional effect;
+- systematic covariate effects;
+- random residual variation.
+
+This creates
+
+\[
+6\times2\times4=48
+\]
+
+cells.
+
+```{r design}
+set.seed(2026)
+
+n_patients &lt;- 6L
+cells_per_region &lt;- 4L
+n_features &lt;- 20L
+
+patient_levels &lt;- paste0(
+  &quot;P&quot;,
+  seq_len(n_patients)
+)
+
+patient &lt;- factor(
+  rep(
+    patient_levels,
+    each = 2L * cells_per_region
+  ),
+  levels = patient_levels
+)
+
+region &lt;- factor(
+  rep(
+    rep(
+      c(&quot;Core&quot;, &quot;Edge&quot;),
+      each = cells_per_region
+    ),
+    times = n_patients
+  ),
+  levels = c(&quot;Core&quot;, &quot;Edge&quot;)
+)
+
+table(patient, region)</code></pre>
+<p>Every patient contributes observations from both prespecified
+regions.</p>
+<h1 data-number="9" id="patient-level-covariates"><span
+class="header-section-number">9</span> Patient-Level Covariates</h1>
+<p>```{r patient-covariates} covariates &lt;- data.frame( age = c( 45,
+52, 61, 48, 57, 66 ), sex = factor( c( “F”, “M”, “F”, “M”, “F”, “M” ),
+levels = c( “F”, “M” ) ), row.names = patient_levels )</p>
+<p>covariates</p>
+<pre><code>
+There are two original patient-level variables.
+
+After `model.matrix()` coding:
+
+- age contributes one numeric design column;
+- sex contributes one indicator column because it has two levels.
+
+Therefore
+
+\[
+q=2.
+\]
+
+With \(P=6\) patients,
+
+\[
+\mathrm{dim}\{\mathrm{Null}(X_0^T)\}
+=
+P-(q+1)
+=
+6-3
+=
+3.
+\]
+
+So the residual patient effect has three degrees of freedom in this example.
+
+# Simulated Feature-by-Cell Data
+
+```{r simulate-data}
+n_cells &lt;- length(patient)
+
+age_centered &lt;- covariates$age -
+  mean(covariates$age)
+
+sex_numeric &lt;- as.numeric(
+  covariates$sex == &quot;M&quot;
+)
+
+patient_index &lt;- match(
+  as.character(patient),
+  patient_levels
+)
+
+region_code &lt;- ifelse(
+  region == &quot;Edge&quot;,
+  1,
+  -1
+)
+
+dat &lt;- matrix(
+  rnorm(
+    n_features * n_cells,
+    mean = 0,
+    sd = 0.8
+  ),
+  nrow = n_features,
+  ncol = n_cells
+)
+
+rownames(dat) &lt;- paste0(
+  &quot;Feature&quot;,
+  seq_len(n_features)
+)
+
+colnames(dat) &lt;- paste0(
+  &quot;Cell&quot;,
+  seq_len(n_cells)
+)
+
+for (g in seq_len(n_features)) {
+
+  dat[g, ] &lt;- dat[g, ] +
+    5 +
+    0.5 * region_code +
+    0.04 * age_centered[patient_index] +
+    0.35 * sex_numeric[patient_index]
+}
+
+dim(dat)</code></pre>
+<p>The simulated mean contains a population-average regional component
+together with systematic age and sex contributions.</p>
+<h1 data-number="10" id="fit-covariate-adjusted-rpbc"><span
+class="header-section-number">10</span> Fit Covariate-Adjusted RPBC</h1>
+<p><code>{r fit-covariate-rpbc} fit_cov &lt;- .rpbc_fit_matrix(   dat = dat,   patient = patient,   region = region,   covariates = covariates,   core_level = "Core",   edge_level = "Edge" )</code></p>
+<h1 data-number="11"
+id="confirm-that-the-covariate-branch-was-used"><span
+class="header-section-number">11</span> Confirm That the Covariate
+Branch Was Used</h1>
+<p>```{r mode-check} fit_cov$covariate_adjusted</p>
+<p>fit_cov$q_covariates</p>
+<p>fit_cov$residual_patient_df</p>
+<pre><code>
+The expected results are:
+
+- `covariate_adjusted = TRUE`;
+- `q_covariates = 2`;
+- `residual_patient_df = 3`.
+
+These values verify that the engine recognized the supplied covariates and allocated the expected number of residual patient degrees of freedom.
+
+# Inspect the Patient-Level Covariate Design
+
+```{r inspect-x}
+fit_cov$covariate_design_patient
+
+fit_cov$augmented_design_patient
+
+fit_cov$covariate_design_names
+
+fit_cov$covariate_original_names</code></pre>
+<p>The design returned by the engine separates the user-supplied
+variables from the coded design columns.</p>
+<p>This distinction matters because a categorical variable may generate
+more than one design column in a general analysis.</p>
+<h1 data-number="12" id="verify-equal-patient-centering"><span
+class="header-section-number">12</span> Verify Equal-Patient
+Centering</h1>
+<p>The coded covariate matrix should be centered equally across
+patients:</p>
+<p>[ <em>{p=1}^{P}X</em>{pk}=0 ]</p>
+<p>for each design column (k).</p>
+<p><code>{r centered-x} colMeans(   fit_cov$covariate_design_patient )</code></p>
+<p>Numerically these values should be approximately zero, up to
+floating-point precision.</p>
+<p>```{r centered-x-pass} stopifnot( max( abs( colMeans(
+fit_cov$covariate_design_patient ) ) ) &lt; 1e-10 )</p>
+<p>cat(“Centered patient-level covariate design: PASS”)</p>
+<pre><code>
+# Constructing the Residual Patient Null Space
+
+The residual patient effect is represented using a basis \(Q_\perp\) for
+
+\[
+\mathrm{Null}(X_0^T).
+\]
+
+Therefore
+
+\[
+X_0^TQ_\perp=0.
+\]
+
+```{r nullspace-check}
+fit_cov$nullspace_error
+
+nullspace_check &lt;- t(
+  fit_cov$augmented_design_patient
+) %*%
+  fit_cov$residual_patient_basis
+
+nullspace_check
+
+max(
+  abs(
+    nullspace_check
+  )
+)</code></pre>
+<p>The maximum absolute value should be near machine precision.</p>
+<p>```{r nullspace-pass} stopifnot( fit_cov$nullspace_error &lt; 1e-8
+)</p>
+<p>cat(“Residual patient null-space construction: PASS”)</p>
+<pre><code>
+# Full Location Model
+
+The covariate-adjusted location model fitted by the engine contains:
+
+\[
+[\mathbf 1,\;R,\;X,\;Q_\perp,\;PR].
+\]
+
+The columns correspond to:
+
+1. intercept;
+2. population-average region effect;
+3. protected patient-level covariates;
+4. residual patient basis;
+5. patient-by-region interaction basis.
+
+The full model must be identifiable.
+
+```{r design-rank}
+fit_cov$design_rank
+
+fit_cov$design_columns
+
+stopifnot(
+  fit_cov$design_rank ==
+    fit_cov$design_columns
+)
+
+cat(&quot;Full covariate-adjusted design rank: PASS\n&quot;)</code></pre>
+<h1 data-number="13" id="protected-location-component"><span
+class="header-section-number">13</span> Protected Location
+Component</h1>
+<p>For ordinary RPBC the protected mean is</p>
+<p>[ <em>g+</em>{Rg}R_r. ]</p>
+<p>For covariate-adjusted RPBC it becomes</p>
+<p>[ <em>g+</em>{Rg}R_r+x_p^T_{Xg}. ]</p>
+<p>The engine returns this fitted protected mean directly.</p>
+<p>```{r protected-mean} dim( fit_cov$protected_mean )</p>
+<p>fit_cov<span class="math inline">\(beta_covariate_hat[
+  ,
+  1:min(5, ncol(fit_cov\)</span>beta_covariate_hat)), drop = FALSE ]</p>
+<pre><code>
+The protected mean has the same feature-by-cell dimensions as the original data.
+
+```{r protected-mean-pass}
+stopifnot(
+  identical(
+    dim(fit_cov$protected_mean),
+    dim(dat)
+  )
+)
+
+cat(&quot;Protected mean dimensions: PASS\n&quot;)</code></pre>
+<h1 data-number="14" id="initial-residual-patient-effects"><span
+class="header-section-number">14</span> Initial Residual Patient
+Effects</h1>
+<p>The initial residual patient effects are estimated in the null-space
+basis and then mapped back to patient space.</p>
+<p>The required identifying condition is</p>
+<p>[ X_0^T_g=0. ]</p>
+<p>```{r initial-gamma-constraint}
+fit_cov$gamma_hat_constraint_error</p>
+<p>initial_gamma_check &lt;- t( fit_cov<span
+class="math inline">\(augmented_design_patient
+) %*%
+  fit_cov\)</span>gamma_hat</p>
+<p>max( abs( initial_gamma_check ) )</p>
+<pre><code>
+```{r initial-gamma-pass}
+stopifnot(
+  fit_cov$gamma_hat_constraint_error &lt; 1e-7
+)
+
+cat(&quot;Initial residual patient constraint: PASS\n&quot;)</code></pre>
+<h1 data-number="15"
+id="initial-patient-by-region-interaction-constraint"><span
+class="header-section-number">15</span> Initial Patient-by-Region
+Interaction Constraint</h1>
+<p>The patient-by-region interaction retains the ordinary RPBC
+restriction</p>
+<p>[ <em>p</em>{pg}=0. ]</p>
+<p>```{r initial-kappa-constraint}
+fit_cov$kappa_hat_constraint_error</p>
+<p>max( abs( colSums( fit_cov$kappa_hat ) ) )</p>
+<pre><code>
+```{r initial-kappa-pass}
+stopifnot(
+  fit_cov$kappa_hat_constraint_error &lt; 1e-7
+)
+
+cat(&quot;Initial patient-by-region constraint: PASS\n&quot;)</code></pre>
+<h1 data-number="16"
+id="empirical-bayes-identifying-constraint-matrix"><span
+class="header-section-number">16</span> Empirical-Bayes Identifying
+Constraint Matrix</h1>
+<p>The posterior vector contains both patient and patient-by-region
+effects.</p>
+<p>For covariate-adjusted RPBC the constraint matrix contains:</p>
+<ul>
+<li>one row for every column of (X_0), enforcing (X_0^T_g=0);</li>
+<li>one additional row enforcing (<em>p</em>{pg}=0).</li>
+</ul>
+<p>The constraint matrix itself must have full row rank.</p>
+<p>```{r constraint-rank} fit_cov$constraint_rank</p>
+<p>fit_cov$constraint_rows</p>
+<p>stopifnot( fit_cov<span class="math inline">\(constraint_rank ==
+    fit_cov\)</span>constraint_rows )</p>
+<p>cat(“Identifying constraint matrix rank: PASS”)</p>
+<pre><code>
+# Posterior Residual Patient Constraint
+
+After the empirical-Bayes iterations, the posterior residual patient effects must continue to satisfy
+
+\[
+X_0^T\gamma_g^*=0.
+\]
+
+```{r posterior-gamma-constraint}
+fit_cov$gamma_star_constraint_error
+
+posterior_gamma_check &lt;- t(
+  fit_cov$augmented_design_patient
+) %*%
+  fit_cov$gamma_star
+
+max(
+  abs(
+    posterior_gamma_check
+  )
+)</code></pre>
+<p>```{r posterior-gamma-pass} stopifnot(
+fit_cov$gamma_star_constraint_error &lt; 1e-7 )</p>
+<p>cat(“Posterior residual patient constraint: PASS”)</p>
+<pre><code>
+# Posterior Patient-by-Region Constraint
+
+The posterior interaction effects must satisfy
+
+\[
+\sum_p\kappa_{pg}^*=0.
+\]
+
+```{r posterior-kappa-constraint}
+fit_cov$kappa_star_constraint_error
+
+max(
+  abs(
+    colSums(
+      fit_cov$kappa_star
+    )
+  )
+)</code></pre>
+<p>```{r posterior-kappa-pass} stopifnot(
+fit_cov$kappa_star_constraint_error &lt; 1e-7 )</p>
+<p>cat(“Posterior patient-by-region constraint: PASS”)</p>
+<pre><code>
+# Scale Estimation: Why This Is Not Adaptive RPBC
+
+Covariate adjustment changes the **location decomposition and identifying restriction**.
+
+It does not, by itself, change the ordinary RPBC patient-region scale update.
+
+Therefore this engine uses the ordinary empirical-Bayes update for
+
+\[
+\delta_{pr,g}^2
+\]
+
+without the group-size-dependent stabilization used by Adaptive RPBC.
+
+This distinction is intentional:
+
+- ordinary RPBC: ordinary location structure and ordinary scale update;
+- covariate-adjusted RPBC: covariate-adjusted location structure and ordinary scale update;
+- Adaptive RPBC: Adaptive scale stabilization handled by the separate Adaptive engine.
+
+This keeps the two extensions conceptually distinct.
+
+# Harmonization
+
+On the standardized scale, the nuisance location for patient \(p\), region \(r\), and feature \(g\) is
+
+\[
+\gamma_{pg}^*
++
+\kappa_{pg}^*R_r.
+\]
+
+The engine removes this nuisance component and divides by the square root of the posterior patient-region variance multiplier.
+
+The result is then returned to the original feature scale and the complete protected mean is restored:
+
+\[
+\alpha_g
++
+\beta_{Rg}R_r
++
+x_p^T\beta_{Xg}.
+\]
+
+This is the defining preservation step of covariate-adjusted RPBC.
+
+# Output Integrity
+
+```{r output-integrity}
+dim(
+  fit_cov$data
+)
+
+dim(
+  dat
+)
+
+all(
+  is.finite(
+    fit_cov$data
+  )
+)
+
+identical(
+  dimnames(fit_cov$data),
+  dimnames(dat)
+)</code></pre>
+<p>```{r output-integrity-pass} stopifnot( identical( dim(fit_cov$data),
+dim(dat) ),</p>
+<p>identical( dimnames(fit_cov$data), dimnames(dat) ),</p>
+<p>all( is.finite( fit_cov$data ) ) )</p>
+<p>cat(“Harmonized output integrity: PASS”)</p>
+<pre><code>
+# Complete Automatic Validation
+
+The core checks can be collected into a single automatic validation block.
+
+```{r complete-validation}
+stopifnot(
+  isTRUE(
+    fit_cov$covariate_adjusted
+  ),
+
+  fit_cov$q_covariates == 2L,
+
+  fit_cov$residual_patient_df == 3L,
+
+  max(
+    abs(
+      colMeans(
+        fit_cov$covariate_design_patient
+      )
+    )
+  ) &lt; 1e-10,
+
+  fit_cov$nullspace_error &lt; 1e-8,
+
+  fit_cov$gamma_hat_constraint_error &lt; 1e-7,
+
+  fit_cov$kappa_hat_constraint_error &lt; 1e-7,
+
+  fit_cov$gamma_star_constraint_error &lt; 1e-7,
+
+  fit_cov$kappa_star_constraint_error &lt; 1e-7,
+
+  fit_cov$design_rank ==
+    fit_cov$design_columns,
+
+  fit_cov$constraint_rank ==
+    fit_cov$constraint_rows,
+
+  all(
+    is.finite(
+      fit_cov$data
+    )
+  ),
+
+  identical(
+    dim(fit_cov$data),
+    dim(dat)
+  ),
+
+  identical(
+    dimnames(fit_cov$data),
+    dimnames(dat)
+  )
+)
+
+cat(
+  &quot;\n*** COVARIATE-ADJUSTED RPBC VALIDATION PASSED ***\n&quot;
+)</code></pre>
+<h1 data-number="17"
+id="patient-level-versus-cell-level-covariate-input"><span
+class="header-section-number">17</span> Patient-Level Versus Cell-Level
+Covariate Input</h1>
+<p>The package helper also permits covariates to be supplied once per
+cell, provided each variable is constant within patient.</p>
+<p>The following converts the patient-level covariates to cell-level
+form.</p>
+<p>```{r cell-level-covariates} covariates_cell &lt;- covariates[ match(
+as.character(patient), rownames(covariates) ), , drop = FALSE]</p>
+<p>rownames(covariates_cell) &lt;- NULL</p>
+<p>head( covariates_cell )</p>
+<pre><code>
+Fit the same model using cell-level covariate input.
+
+```{r cell-level-fit}
+fit_cov_cell &lt;- .rpbc_fit_matrix(
+  dat = dat,
+  patient = patient,
+  region = region,
+  covariates = covariates_cell,
+  core_level = &quot;Core&quot;,
+  edge_level = &quot;Edge&quot;
+)</code></pre>
+<p>The resulting patient-level coded design should agree with the design
+obtained from the one-row-per-patient input.</p>
+<p>```{r patient-cell-equivalence} all.equal( fit_cov<span
+class="math inline">\(covariate_design_patient,
+  fit_cov_cell\)</span>covariate_design_patient, tolerance = 1e-12 )</p>
+<p>all.equal( fit_cov<span class="math inline">\(data,
+  fit_cov_cell\)</span>data, tolerance = 1e-10 )</p>
+<pre><code>
+```{r patient-cell-equivalence-pass}
+stopifnot(
+  isTRUE(
+    all.equal(
+      fit_cov$covariate_design_patient,
+      fit_cov_cell$covariate_design_patient,
+      tolerance = 1e-12
+    )
+  ),
+
+  isTRUE(
+    all.equal(
+      fit_cov$data,
+      fit_cov_cell$data,
+      tolerance = 1e-10
+    )
+  )
+)
+
+cat(&quot;Patient-level and valid cell-level covariate inputs agree: PASS\n&quot;)</code></pre>
+<h1 data-number="18" id="relationship-to-ordinary-rpbc"><span
+class="header-section-number">18</span> Relationship to Ordinary
+RPBC</h1>
+<p>When no covariates are supplied,</p>
+<div class="sourceCode" id="cb16"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb16-1"><a href="#cb16-1" aria-hidden="true" tabindex="-1"></a>covariates <span class="ot">=</span> <span class="cn">NULL</span></span></code></pre></div>
+<p>the same engine returns the ordinary RPBC configuration.</p>
+<p>```{r ordinary-mode-check} fit_ordinary &lt;- .rpbc_fit_matrix( dat =
+dat, patient = patient, region = region, covariates = NULL, core_level =
+“Core”, edge_level = “Edge” )</p>
+<p>fit_ordinary$covariate_adjusted</p>
+<p>dim( fit_ordinary$covariate_design_patient )</p>
+<p>dim( fit_ordinary$augmented_design_patient )</p>
+<p>fit_ordinary$q_covariates</p>
+<p>fit_ordinary$residual_patient_df ```</p>
+<p>The expected structure is:</p>
+<ul>
+<li><code>covariate_adjusted = FALSE</code>;</li>
+<li>(X) has (P) rows and zero columns;</li>
+<li>(X_0) contains only the intercept;</li>
+<li>(q=0);</li>
+<li>residual patient degrees of freedom equal (P-1).</li>
+</ul>
+<p>This is how one internal engine supports both ordinary and
+covariate-adjusted RPBC without duplicating the statistical
+algorithm.</p>
+<h1 data-number="19" id="why-the-unified-engine-is-useful"><span
+class="header-section-number">19</span> Why the Unified Engine Is
+Useful</h1>
+<p>The unified implementation reflects the statistical nesting of the
+models.</p>
+<p>Ordinary RPBC is recovered by setting</p>
+<p>[ X=. ]</p>
+<p>Then</p>
+<p>[ X_0= ]</p>
+<p>and</p>
+<p>[ X_0^T_g=0 ]</p>
+<p>reduces to</p>
+<p>[ <em>p</em>{pg}=0. ]</p>
+<p>Thus the ordinary identifying restriction is a special case of the
+covariate-adjusted restriction.</p>
+<p>This provides a clean conceptual interpretation:</p>
+<p>[ ]</p>
+<p>while Adaptive RPBC remains separate because its scale update is
+genuinely different.</p>
+<h1 data-number="20" id="interpretation-of-the-validation"><span
+class="header-section-number">20</span> Interpretation of the
+Validation</h1>
+<p>The controlled example establishes the following implementation
+properties:</p>
+<ol type="1">
+<li><p><strong>Covariate recognition</strong><br />
+The engine correctly recognizes supplied patient-level covariates and
+switches to the covariate-adjusted branch.</p></li>
+<li><p><strong>Patient-balanced coding</strong><br />
+Covariate columns are centered across patients rather than weighted by
+cell counts.</p></li>
+<li><p><strong>Null-space construction</strong><br />
+The residual patient basis satisfies</p>
+<p>[ X_0^TQ_. ]</p></li>
+<li><p><strong>Initial identifiability</strong><br />
+The initial residual patient effects satisfy</p>
+<p>[ X_0^T_g. ]</p></li>
+<li><p><strong>Posterior identifiability</strong><br />
+The constrained empirical-Bayes estimates satisfy</p>
+<p>[ X_0^T_g^*. ]</p></li>
+<li><p><strong>Interaction identifiability</strong><br />
+Both initial and posterior patient-by-region effects satisfy their
+sum-to-zero restriction.</p></li>
+<li><p><strong>Full-rank estimation</strong><br />
+Both the location design and identifying constraint matrix have the
+required ranks.</p></li>
+<li><p><strong>Protected covariate component</strong><br />
+The systematic patient-level covariate contribution is retained in the
+protected mean instead of being removed as nuisance variation.</p></li>
+<li><p><strong>Ordinary scale update retained</strong><br />
+Covariate adjustment does not invoke the Adaptive variance-stabilization
+mechanism.</p></li>
+<li><p><strong>Output integrity</strong><br />
+The harmonized matrix retains the input dimensions and names and
+contains finite values.</p></li>
+</ol>
+<h1 data-number="21" id="final-validation-summary"><span
+class="header-section-number">21</span> Final Validation Summary</h1>
+<p>The covariate-adjusted RPBC engine is numerically consistent with the
+intended model structure:</p>
+<p>[ Y_{prjg} = <em>g + </em>{Rg}R_r + x_p^T<em>{Xg} + </em>{pg} +
+<em>{pg}R_r + </em>{pr,g}_{prjg}, ]</p>
+<p>with protected location component</p>
+<p>[ <em>g + </em>{Rg}R_r + x_p^T_{Xg}, ]</p>
+<p>and identifying restrictions</p>
+<p>[ X_0^T_g=0 ]</p>
+<p>and</p>
+<p>[ <em>p</em>{pg}=0. ]</p>
+<p>The validation therefore supports the implementation of
+covariate-adjusted RPBC as a unified extension of ordinary RPBC in which
+prespecified patient-level systematic variation is preserved while
+residual patient and patient-by-region nuisance effects are
+harmonized.</p>
+<p><strong>Overall validation result: PASS</strong></p>
+</body>
+</html>

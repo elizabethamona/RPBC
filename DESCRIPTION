@@ -1,0 +1,41 @@
+Package: RPBC
+Title: Region-Preserving Batch Correction for Paired Region-Resolved Single-Cell Data
+Version: 0.99.0
+Authors@R:
+    person(
+        given = "Elizabeth B.",
+        family = "Amona",
+        email = "amonaelizabeth1@gmail.com",
+        role = c("aut", "cre"),
+        comment = c(ORCID = "0000-0002-7575-788X")
+    )
+Description: Implements Region-Preserving Batch Correction (RPBC), an
+    empirical-Bayes location-scale framework for paired region-resolved
+    single-cell and spatial-omics data. RPBC preserves a patient-balanced
+    population-average regional contrast while harmonizing patient-wide
+    location shifts, patient-specific regional deviations, and patient-region
+    scale heterogeneity. The package also provides Adaptive RPBC for
+    group-size-dependent stabilization of patient-region scale variation and
+    covariate-adjusted RPBC for preserving prespecified patient-level
+    covariate-associated variation during harmonization. RPBC is designed
+    to interoperate with Bioconductor data structures for single-cell and
+    spatial experiments.
+License: MIT + file LICENSE
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+Config/roxygen2/version: 8.1.0
+biocViews: BatchEffect, Preprocessing, SingleCell, Spatial, StatisticalMethod
+Suggests: 
+    BiocStyle,
+    knitr,
+    rmarkdown,
+    testthat (>= 3.0.0)
+Config/testthat/edition: 3
+Imports: 
+    matrixStats,
+    SingleCellExperiment,
+    SpatialExperiment,
+    SummarizedExperiment
+Depends:
+    R (>= 4.6.0)
+VignetteBuilder: knitr
