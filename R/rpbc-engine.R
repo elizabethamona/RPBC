@@ -176,7 +176,7 @@
       PR
     )
 
-    protected_rows <- 1:2
+    protected_rows <- c(1,2)
     covariate_rows <- integer(0)
 
     residual_patient_rows <-

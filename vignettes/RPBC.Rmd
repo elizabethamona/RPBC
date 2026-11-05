@@ -29,6 +29,20 @@ knitr::opts_chunk$set(
 )
 ```
 
+# Installation
+
+RPBC can be installed from Bioconductor using:
+
+```{r installation, eval=FALSE}
+if (!requireNamespace("BiocManager", quietly = TRUE)) {
+  install.packages("BiocManager")
+}
+
+BiocManager::install("RPBC")
+```
+
+After installation, load the package with:
+
 ```{r load-package}
 library(RPBC)
 ```

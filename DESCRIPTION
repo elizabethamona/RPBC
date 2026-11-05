@@ -1,6 +1,6 @@
 Package: RPBC
 Title: Region-Preserving Batch Correction for Paired Region-Resolved Single-Cell Data
-Version: 0.99.0
+Version: 0.99.1
 Authors@R:
     person(
         given = "Elizabeth B.",
